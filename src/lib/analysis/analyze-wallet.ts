@@ -85,11 +85,16 @@ export async function analyzeWallet(
     throw new Error(`"${walletAddress}" is not a valid Solana wallet address`);
   }
 
+  // Each of these is fetched independently and degrades to an empty/neutral
+  // result on failure — one endpoint being unavailable (permission tier,
+  // transient error, etc.) must never take down the whole analysis. Only
+  // getWalletPnL is allowed to throw: without it there's nothing useful to
+  // show anyway, and the caller (Route Handler / page) surfaces that clearly.
   const [pnlWindow, rawPositions, profitByToken, chartPoints, trades] = await Promise.all([
     birdeyeWalletAnalytics.getWalletPnL(walletAddress, windowLabel),
-    birdeyeWalletAnalytics.getWalletBalances(walletAddress),
-    birdeyeWalletAnalytics.getWalletProfitByToken(walletAddress),
-    getWalletPnlChart(walletAddress),
+    birdeyeWalletAnalytics.getWalletBalances(walletAddress).catch(() => []),
+    birdeyeWalletAnalytics.getWalletProfitByToken(walletAddress).catch(() => []),
+    getWalletPnlChart(walletAddress).catch(() => []),
     heliusTransactions.getWalletTransactions(walletAddress, { limit: 50 }).catch(() => []),
   ]);
 

@@ -17,6 +17,13 @@ system is a fully virtual paper-trading simulator.
 - A [Helius](https://dev.helius.xyz) API key
 - (Optional for now) A [Supabase](https://supabase.com) project
 
+Every variable is validated with Zod (`src/lib/env.ts`). Variables an active code path
+actually needs (Birdeye/Helius keys, Supabase URL/publishable/secret keys) fail loudly
+with a specific "X is not set, add a real value to .env.local" error the moment that code
+path runs, instead of a confusing downstream fetch/auth failure. `DATABASE_URL` and
+`HELIUS_WEBHOOK_AUTH_HEADER` aren't consumed by any code yet (no direct Postgres access;
+webhooks are Phase 1G) so they stay optional for now.
+
 ## Setup
 
 1. Install dependencies:
@@ -39,8 +46,9 @@ system is a fully virtual paper-trading simulator.
 ## Supabase (optional, for persistence)
 
 1. Create a project at https://supabase.com.
-2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`, and `DATABASE_URL` in `.env.local`.
+2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+   `SUPABASE_SECRET_KEY`, and `DATABASE_URL` in `.env.local`. These are Supabase's current
+   API key names (publishable/secret), not the legacy anon/service_role naming.
 3. Apply the schema:
    ```bash
    supabase link --project-ref <your-project-ref>

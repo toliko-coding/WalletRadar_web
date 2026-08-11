@@ -60,6 +60,14 @@ export function WalletAnalysisView({ analysis }: { analysis: WalletAnalysis }) {
         </div>
       ) : null}
 
+      {analysis.dataCaveats.length > 0 ? (
+        <div className="space-y-1.5 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
+          {analysis.dataCaveats.map((caveat) => (
+            <div key={caveat}>⚠ {caveat}</div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Smart Score explainability */}
       <div className="rounded-lg border border-border bg-surface px-5 py-4">
         <div className="mb-3 text-sm font-medium text-foreground">Why this score</div>

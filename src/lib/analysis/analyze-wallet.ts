@@ -3,7 +3,9 @@ import { birdeyeWalletAnalytics, getWalletPnlChart } from "@/lib/providers/birde
 import { heliusTransactions } from "@/lib/providers/helius/transactions";
 import { calculateSmartScore } from "@/lib/scoring/smart-score";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
-import type { Position, RiskLevel, WalletAnalysis } from "@/types/domain";
+import { assertNoError } from "@/lib/supabase/assert";
+import { RECOMMENDED_EXCLUDED_TRADER_TYPES } from "@/lib/discovery/trader-type";
+import type { Position, RiskLevel, TraderType, WalletAnalysis } from "@/types/domain";
 
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -17,6 +19,16 @@ const RECOMMENDED = {
   maxDrawdownPct: 30,
   recentActivityDays: 7,
 };
+
+export interface AnalyzeWalletOptions {
+  /**
+   * A trader type already known from discovery (Birdeye's wallet_tags on a
+   * top-traders response — see src/lib/discovery/trader-type.ts). Manual
+   * single-wallet lookups (the /discover analyzer, direct /wallet/[address]
+   * visits) have no such hint and default to MANUAL_UNKNOWN, same as before.
+   */
+  traderTypeHint?: TraderType;
+}
 
 export function isValidSolanaAddress(address: string): boolean {
   return SOLANA_ADDRESS_RE.test(address);
@@ -58,6 +70,25 @@ function riskLevelFromDrawdown(drawdownPct: number | null): RiskLevel {
   return "LOW";
 }
 
+/**
+ * Helius's Enhanced Transactions API doesn't return a token symbol, only the
+ * mint — classifyTransaction() always leaves Trade.tokenSymbol null. Fill it
+ * in from Birdeye's per-token PnL breakdown, which the wallet's full trading
+ * history already covers (not just currently-held tokens), so historical
+ * sells show a symbol too. Mints Birdeye hasn't seen stay null — the UI
+ * falls back to a shortened address rather than guessing a symbol.
+ */
+function enrichTradeSymbols(
+  trades: WalletAnalysis["trades"],
+  profitByToken: Array<{ tokenMint: string; tokenSymbol: string | null }>
+): WalletAnalysis["trades"] {
+  const symbolByMint = new Map(profitByToken.map((t) => [t.tokenMint, t.tokenSymbol]));
+  return trades.map((trade) => {
+    const symbol = symbolByMint.get(trade.tokenMint);
+    return symbol ? { ...trade, tokenSymbol: symbol } : trade;
+  });
+}
+
 /** Enriches Birdeye's current-holdings positions with first/latest-buy timestamps found in the (bounded) trade feed. */
 function enrichPositionsWithTradeTimestamps(
   positions: Position[],
@@ -79,7 +110,8 @@ function enrichPositionsWithTradeTimestamps(
 
 export async function analyzeWallet(
   walletAddress: string,
-  windowLabel: string = "90D"
+  windowLabel: string = "90D",
+  options: AnalyzeWalletOptions = {}
 ): Promise<WalletAnalysis> {
   if (!isValidSolanaAddress(walletAddress)) {
     throw new Error(`"${walletAddress}" is not a valid Solana wallet address`);
@@ -99,6 +131,7 @@ export async function analyzeWallet(
   ]);
 
   const positions = enrichPositionsWithTradeTimestamps(rawPositions, trades);
+  const enrichedTrades = enrichTradeSymbols(trades, profitByToken);
   const { pct: profitConcentrationPct, tokenSymbol: concentrationTokenSymbol } =
     computeProfitConcentration(profitByToken);
   const maxDrawdownPct = computeMaxDrawdownPct(chartPoints);
@@ -116,6 +149,7 @@ export async function analyzeWallet(
       : null;
 
   const riskLevel = riskLevelFromDrawdown(maxDrawdownPct);
+  const traderType = options.traderTypeHint ?? "MANUAL_UNKNOWN";
 
   const metrics = {
     ...pnlWindow.metrics,
@@ -129,6 +163,7 @@ export async function analyzeWallet(
     },
     profitConcentrationTokenSymbol: concentrationTokenSymbol,
     riskLevel,
+    traderType,
   };
 
   const smartScore = calculateSmartScore({
@@ -152,35 +187,61 @@ export async function analyzeWallet(
   if ((metrics.winRatePct.value ?? 0) < RECOMMENDED.minWinRatePct) failedCriteria.push(`win rate below ${RECOMMENDED.minWinRatePct}%`);
   if (maxDrawdownPct !== null && maxDrawdownPct > RECOMMENDED.maxDrawdownPct) failedCriteria.push(`drawdown above ${RECOMMENDED.maxDrawdownPct}%`);
   if (lastActivityDaysAgo !== null && lastActivityDaysAgo > RECOMMENDED.recentActivityDays) failedCriteria.push(`no trades in the last ${RECOMMENDED.recentActivityDays} days`);
+  if ((RECOMMENDED_EXCLUDED_TRADER_TYPES as readonly string[]).includes(traderType)) {
+    failedCriteria.push(`tagged ${traderType.toLowerCase().replace("_", " ")}`);
+  }
+
+  // Birdeye's pnl/summary occasionally returns all-zero aggregate counts for
+  // a wallet even when pnl/details and the live trade feed both show real
+  // activity (observed for high-frequency SOL/USDC market makers — likely an
+  // indexing gap on Birdeye's side, not something we can fix). Never silently
+  // blend the two counts into one "corrected" number — that would fabricate
+  // a figure neither source actually returned. Surface the disagreement
+  // instead, since the metric cards above and rejection reason both derive
+  // from the (possibly understated) Birdeye aggregate.
+  const dataCaveats: string[] = [];
+  const classifiedSwapCount = enrichedTrades.filter(
+    (t) => t.type === "DEX_SWAP_BUY" || t.type === "DEX_SWAP_SELL"
+  ).length;
+  if (metrics.tradeCount === 0 && classifiedSwapCount > 0) {
+    dataCaveats.push(
+      `Birdeye reports 0 trades/volume for this wallet in this window, but ${classifiedSwapCount} swaps were found in the recent trade feed below. The Trades/Volume/Win Rate metric cards and Recommended-preset eligibility above reflect Birdeye's aggregate and likely understate real activity.`
+    );
+  }
 
   const analysis: WalletAnalysis = {
     walletAddress,
     metrics,
     smartScore,
     positions,
-    trades,
+    trades: enrichedTrades,
     eligible: failedCriteria.length === 0,
     rejectionReason: failedCriteria.length > 0 ? failedCriteria.join("; ") : null,
+    dataCaveats,
     analyzedAt: new Date().toISOString(),
   };
 
-  await persistBestEffort(analysis);
+  await persistBestEffort(analysis, options.traderTypeHint !== undefined);
   return analysis;
 }
 
-async function persistBestEffort(analysis: WalletAnalysis): Promise<void> {
+async function persistBestEffort(analysis: WalletAnalysis, hasTraderTypeHint: boolean): Promise<void> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return;
 
   try {
-    await supabase.from("wallets").upsert({
+    const walletsResult = await supabase.from("wallets").upsert({
       address: analysis.walletAddress,
       risk_level: analysis.metrics.riskLevel,
-      trader_type: analysis.metrics.traderType,
+      // Only overwrite trader_type when this call actually supplied a fresh
+      // hint (from discovery). A plain manual re-analysis must not clobber a
+      // trader_type discovery already established with the "no idea" default.
+      ...(hasTraderTypeHint ? { trader_type: analysis.metrics.traderType } : {}),
       updated_at: new Date().toISOString(),
     });
+    assertNoError(walletsResult, "upserting wallets");
 
-    await supabase.from("wallet_metrics").upsert(
+    const metricsResult = await supabase.from("wallet_metrics").upsert(
       {
         wallet_address: analysis.walletAddress,
         window_label: analysis.metrics.windowLabel,
@@ -206,10 +267,11 @@ async function persistBestEffort(analysis: WalletAnalysis): Promise<void> {
       },
       { onConflict: "wallet_address,window_label" }
     );
+    assertNoError(metricsResult, "upserting wallet_metrics");
 
-    for (const position of analysis.positions) {
-      await supabase.from("wallet_positions").upsert(
-        {
+    if (analysis.positions.length > 0) {
+      const positionsResult = await supabase.from("wallet_positions").upsert(
+        analysis.positions.map((position) => ({
           wallet_address: analysis.walletAddress,
           token_mint: position.tokenMint,
           token_symbol: position.tokenSymbol,
@@ -228,14 +290,15 @@ async function persistBestEffort(analysis: WalletAnalysis): Promise<void> {
           num_buys: position.numBuys,
           num_partial_sells: position.numPartialSells,
           updated_at: new Date().toISOString(),
-        },
+        })),
         { onConflict: "wallet_address,token_mint" }
       );
+      assertNoError(positionsResult, "upserting wallet_positions");
     }
 
-    for (const trade of analysis.trades) {
-      await supabase.from("wallet_trades").upsert(
-        {
+    if (analysis.trades.length > 0) {
+      const tradesResult = await supabase.from("wallet_trades").upsert(
+        analysis.trades.map((trade) => ({
           wallet_address: analysis.walletAddress,
           tx_signature: trade.signature,
           type: trade.type,
@@ -249,11 +312,16 @@ async function persistBestEffort(analysis: WalletAnalysis): Promise<void> {
           realized_pnl_usd: trade.realizedPnlUsd.value,
           realized_pnl_reliability: trade.realizedPnlUsd.reliability,
           occurred_at: trade.timestamp,
-        },
+        })),
         { onConflict: "wallet_address,tx_signature,instruction_index" }
       );
+      assertNoError(tradesResult, "upserting wallet_trades");
     }
-  } catch {
-    // Best-effort only — persistence failures never block the analyzer response.
+  } catch (err) {
+    // Best-effort only — persistence failures never block the analyzer
+    // response, but must not vanish silently either (that's exactly how a
+    // Postgres grants gap went undetected earlier — see supabase/migrations/
+    // 0002_grants.sql). Logged, not rethrown.
+    console.error(`[persistBestEffort] failed for ${analysis.walletAddress}:`, err);
   }
 }

@@ -94,10 +94,21 @@ interface TopTraderItem {
   trade: number;
   firstTradeUnixTime: number;
   lastTradeUnixTime: number;
+  tags: string[];
 }
 
 interface TopTradersResponse {
   items: TopTraderItem[];
+}
+
+interface TrendingTokenItem {
+  address: string;
+  symbol: string | null;
+  volume24hUSD: number;
+}
+
+interface TrendingTokensResponse {
+  tokens: TrendingTokenItem[];
 }
 
 const DURATION_BY_WINDOW: Record<string, string> = {
@@ -249,6 +260,20 @@ export const birdeyeWalletAnalytics: WalletAnalyticsProvider = {
       realizedPnlUsd: item.realizedPnl,
       volumeUsd: item.volumeUsd,
       tradeCount: item.trade,
+      tags: item.tags ?? [],
+    }));
+  },
+
+  async getTrendingTokens(limit = 10) {
+    const res = await cached(`birdeye:trending:${limit}`, 300, () =>
+      birdeyeRequest<TrendingTokensResponse>("/defi/token_trending", {
+        query: { sort_by: "volumeUSD", sort_type: "desc", limit },
+      })
+    );
+    return res.tokens.map((t) => ({
+      tokenMint: t.address,
+      symbol: t.symbol,
+      volume24hUsd: t.volume24hUSD,
     }));
   },
 };

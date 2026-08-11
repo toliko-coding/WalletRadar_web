@@ -122,5 +122,7 @@ export interface WalletAnalysis {
   trades: Trade[];
   eligible: boolean;
   rejectionReason: string | null;
+  /** Cross-source data-quality notes (e.g. a provider's own aggregate disagreeing with observed trades) — never silently reconciled. */
+  dataCaveats: string[];
   analyzedAt: string;
 }

@@ -71,6 +71,51 @@ describe("classifyTransaction — §18 requirement: never guess buy/sell from a 
     expect(trade.executionPrice.value).toBeNull();
   });
 
+  it("classifies a direct SOL<->USDC swap (a market maker trading SOL itself) as a real trade, not UNKNOWN", () => {
+    // Regression test: this is the exact shape a real wallet's transactions
+    // came back as in live testing. Both legs "look like" quote currencies
+    // under a naive SOL-or-stablecoin-is-always-quote rule, so the old
+    // classifier silently dropped every one of these into UNKNOWN.
+    const sellTx = baseTx({
+      type: "SWAP",
+      tokenTransfers: [
+        { fromUserAccount: WALLET, toUserAccount: OTHER, tokenAmount: 1.034577048, mint: WRAPPED_SOL_MINT },
+        { fromUserAccount: OTHER, toUserAccount: WALLET, tokenAmount: 77.433093, mint: USDC_MINT },
+      ],
+    });
+    const [sell] = classifyTransaction(sellTx, WALLET);
+    expect(sell.type).toBe("DEX_SWAP_SELL");
+    expect(sell.tokenMint).toBe(WRAPPED_SOL_MINT);
+    expect(sell.tokenAmount).toBeCloseTo(1.034577048);
+    expect(sell.usdValue.value).toBeCloseTo(77.433093);
+    expect(sell.usdValue.reliability).toBe("ON_CHAIN");
+
+    const buyTx = baseTx({
+      type: "SWAP",
+      tokenTransfers: [
+        { fromUserAccount: WALLET, toUserAccount: OTHER, tokenAmount: 2000.005426, mint: USDC_MINT },
+        { fromUserAccount: OTHER, toUserAccount: WALLET, tokenAmount: 26.709221457, mint: WRAPPED_SOL_MINT },
+      ],
+    });
+    const [buy] = classifyTransaction(buyTx, WALLET);
+    expect(buy.type).toBe("DEX_SWAP_BUY");
+    expect(buy.tokenMint).toBe(WRAPPED_SOL_MINT);
+    expect(buy.usdValue.value).toBeCloseTo(2000.005426);
+  });
+
+  it("does not guess which side is the traded asset in a stable-for-stable swap", () => {
+    const usdtMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+    const tx = baseTx({
+      type: "SWAP",
+      tokenTransfers: [
+        { fromUserAccount: WALLET, toUserAccount: OTHER, tokenAmount: 100, mint: USDC_MINT },
+        { fromUserAccount: OTHER, toUserAccount: WALLET, tokenAmount: 100, mint: usdtMint },
+      ],
+    });
+    const [trade] = classifyTransaction(tx, WALLET);
+    expect(trade.type).toBe("UNKNOWN");
+  });
+
   it("classifies a plain incoming transfer as TRANSFER_IN, not a buy", () => {
     const tx = baseTx({
       type: "TRANSFER",

@@ -31,6 +31,8 @@ const envSchema = z.object({
   SUPABASE_SECRET_KEY: z.string().optional().default(""),
   DATABASE_URL: z.string().optional().default(""),
   NEXT_PUBLIC_APP_URL: z.string().optional().default("http://localhost:3000"),
+  /** Shared secret for internal job endpoints (§59) — see src/lib/jobs/auth.ts. */
+  INTERNAL_JOB_SECRET: z.string().optional().default(""),
 });
 
 type Env = z.infer<typeof envSchema>;

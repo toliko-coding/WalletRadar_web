@@ -25,8 +25,19 @@ const STABLECOIN_MINTS = new Set([
   "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
 ]);
 
-function isQuoteMint(mint: string): boolean {
-  return mint === WRAPPED_SOL_MINT || STABLECOIN_MINTS.has(mint);
+/**
+ * Higher priority = more "quote-like". A stablecoin is always the quote
+ * side of a swap; SOL is the quote side against an arbitrary token but is
+ * itself the *traded asset* when swapped directly against a stablecoin
+ * (e.g. a market maker buying/selling SOL/USDC) — a plain "is this SOL or a
+ * stablecoin" boolean can't express that, which is why an earlier version of
+ * this classifier silently dropped every SOL/USDC swap into UNKNOWN (neither
+ * leg looked like "the token being traded").
+ */
+function quotePriority(mint: string): number {
+  if (STABLECOIN_MINTS.has(mint)) return 2;
+  if (mint === WRAPPED_SOL_MINT) return 1;
+  return 0;
 }
 
 function explorerUrl(signature: string): string {
@@ -84,38 +95,34 @@ function classifySwap(
   const received = tx.tokenTransfers.filter((t) => t.toUserAccount === walletAddress);
   const sent = tx.tokenTransfers.filter((t) => t.fromUserAccount === walletAddress);
 
-  const nonQuoteReceived = received.filter((t) => !isQuoteMint(t.mint));
-  const nonQuoteSent = sent.filter((t) => !isQuoteMint(t.mint));
-  const quoteReceived = received.find((t) => isQuoteMint(t.mint));
-  const quoteSent = sent.find((t) => isQuoteMint(t.mint));
-
-  const trades: Trade[] = [];
-
-  // BUY: wallet received a non-quote token and paid with SOL/stablecoin.
-  if (nonQuoteReceived.length === 1 && (quoteSent || nonQuoteReceived.length !== received.length)) {
-    const tokenIn = nonQuoteReceived[0];
-    const usdValue = quoteSent ? resolveQuoteUsd(quoteSent.tokenAmount, quoteSent.mint, solPriceUsd) : unavailable<number>();
-    trades.push(
-      buildTrade(tx, walletAddress, timestamp, "DEX_SWAP_BUY", tokenIn.mint, tokenIn.tokenAmount, usdValue)
-    );
-  }
-
-  // SELL: wallet sent a non-quote token and received SOL/stablecoin.
-  if (nonQuoteSent.length === 1 && (quoteReceived || nonQuoteSent.length !== sent.length)) {
-    const tokenOut = nonQuoteSent[0];
-    const usdValue = quoteReceived
-      ? resolveQuoteUsd(quoteReceived.tokenAmount, quoteReceived.mint, solPriceUsd)
-      : unavailable<number>();
-    trades.push(
-      buildTrade(tx, walletAddress, timestamp, "DEX_SWAP_SELL", tokenOut.mint, tokenOut.tokenAmount, usdValue)
-    );
-  }
-
-  if (trades.length === 0) {
+  // Only the common case — the wallet received exactly one token leg and
+  // sent exactly one token leg — is classified as a trade. Multi-hop routes
+  // that touch the wallet's accounts more than once on a side fall through
+  // to UNKNOWN rather than guessing which leg is "the" trade.
+  if (received.length !== 1 || sent.length !== 1) {
     return buildNonTradeRecords(tx, walletAddress, timestamp, "UNKNOWN");
   }
 
-  return trades;
+  const inLeg = received[0];
+  const outLeg = sent[0];
+  const inPriority = quotePriority(inLeg.mint);
+  const outPriority = quotePriority(outLeg.mint);
+
+  if (inPriority === outPriority) {
+    // Equal priority (e.g. stable-for-stable, or two mints we don't recognize
+    // as SOL/a stablecoin) — we can't tell which side is "the traded asset".
+    return buildNonTradeRecords(tx, walletAddress, timestamp, "UNKNOWN");
+  }
+
+  if (inPriority < outPriority) {
+    // Received the lower-priority (traded) asset, paid with the higher-priority (quote) asset.
+    const usdValue = resolveQuoteUsd(outLeg.tokenAmount, outLeg.mint, solPriceUsd);
+    return [buildTrade(tx, walletAddress, timestamp, "DEX_SWAP_BUY", inLeg.mint, inLeg.tokenAmount, usdValue)];
+  }
+
+  // Sent the lower-priority (traded) asset, received the higher-priority (quote) asset.
+  const usdValue = resolveQuoteUsd(inLeg.tokenAmount, inLeg.mint, solPriceUsd);
+  return [buildTrade(tx, walletAddress, timestamp, "DEX_SWAP_SELL", outLeg.mint, outLeg.tokenAmount, usdValue)];
 }
 
 function resolveQuoteUsd(amount: number, mint: string, solPriceUsd: number | null): ReliableValue<number> {

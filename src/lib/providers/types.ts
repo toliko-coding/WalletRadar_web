@@ -29,8 +29,20 @@ export interface WalletAnalyticsProvider {
     tokenMint: string,
     opts?: { timeFrame?: string; limit?: number }
   ): Promise<
-    Array<{ walletAddress: string; realizedPnlUsd: number; volumeUsd: number; tradeCount: number }>
+    Array<{
+      walletAddress: string;
+      realizedPnlUsd: number;
+      volumeUsd: number;
+      tradeCount: number;
+      /** Birdeye's own labels for this wallet, e.g. "dev" | "bundler" | "sniper" | "insider" | "smart_trader". */
+      tags: string[];
+    }>
   >;
+
+  /** Currently-trending tokens — the top of the discovery pipeline (§4). */
+  getTrendingTokens(
+    limit?: number
+  ): Promise<Array<{ tokenMint: string; symbol: string | null; volume24hUsd: number }>>;
 }
 
 export interface TransactionProvider {

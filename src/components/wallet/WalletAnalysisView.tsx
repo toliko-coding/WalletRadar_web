@@ -28,9 +28,10 @@ export function WalletAnalysisView({ analysis }: { analysis: WalletAnalysis }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-surface px-5 py-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-foreground">{analysis.walletAddress}</span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm text-foreground sm:hidden">{shortAddress(analysis.walletAddress)}</span>
+            <span className="hidden font-mono text-sm text-foreground sm:inline">{analysis.walletAddress}</span>
             <CopyButton value={analysis.walletAddress} />
             <a
               href={`https://solscan.io/account/${analysis.walletAddress}`}

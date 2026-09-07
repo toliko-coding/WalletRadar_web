@@ -3,14 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/discover", label: "Discover" },
-  { href: "/smart-money", label: "Smart Money" },
-  { href: "/demo", label: "Demo" },
-  { href: "/settings", label: "Settings" },
-] as const;
+import { NAV_ITEMS } from "./nav-items";
 
 export function Sidebar() {
   const pathname = usePathname();

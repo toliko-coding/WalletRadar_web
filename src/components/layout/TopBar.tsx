@@ -15,11 +15,11 @@ function StatusPill({ label, connected }: { label: string; connected: boolean })
 
 export function TopBar() {
   return (
-    <header className="flex items-center justify-between border-b border-border bg-background/80 px-6 py-3">
-      <div className="text-sm text-muted">
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/80 px-4 py-3 sm:px-6">
+      <div className="hidden text-sm text-muted sm:block">
         Solana wallet intelligence &amp; paper-trading research
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <StatusPill label="Birdeye" connected={isBirdeyeConfigured()} />
         <StatusPill label="Helius" connected={isHeliusConfigured()} />
         <StatusPill label="Supabase" connected={isSupabaseConfigured()} />

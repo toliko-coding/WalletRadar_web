@@ -28,12 +28,12 @@ export function WalletAnalyzerForm() {
         Discovery is automated in later phases — for now, analyze any Solana wallet
         directly against live Birdeye/Helius data to validate the pipeline.
       </p>
-      <form onSubmit={handleSubmit} className="mt-3 flex gap-2">
+      <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="Enter a Solana wallet address…"
-          className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
         />
         <button
           type="submit"

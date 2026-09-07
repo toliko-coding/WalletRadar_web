@@ -2,7 +2,7 @@ import "server-only";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { nullableGteFilter, nullableLteFilter, inListLiteral } from "@/lib/discovery/query-filters";
 import type { FilterCriteria } from "@/lib/discovery/presets";
-import type { DataReliability, RiskLevel } from "@/types/domain";
+import type { DataReliability, RiskLevel, TraderType } from "@/types/domain";
 
 export interface LeaderboardRow {
   walletAddress: string;
@@ -18,6 +18,7 @@ export interface LeaderboardRow {
   tradingHistoryDays: number | null;
   lastActivityAt: string | null;
   riskLevel: RiskLevel | null;
+  traderType: TraderType | null;
 }
 
 /**
@@ -90,5 +91,6 @@ export async function getLeaderboard(
     tradingHistoryDays: row.trading_history_days as number | null,
     lastActivityAt: row.last_activity_at as string | null,
     riskLevel: (row.risk_level as RiskLevel | null) ?? null,
+    traderType: ((row.wallets as { trader_type: TraderType } | null)?.trader_type as TraderType | undefined) ?? null,
   }));
 }

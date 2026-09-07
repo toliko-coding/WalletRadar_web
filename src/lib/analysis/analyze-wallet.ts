@@ -5,6 +5,7 @@ import { calculateSmartScore } from "@/lib/scoring/smart-score";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { assertNoError } from "@/lib/supabase/assert";
 import { RECOMMENDED_EXCLUDED_TRADER_TYPES } from "@/lib/discovery/trader-type";
+import { resolveTraderType } from "@/lib/discovery/bot-detection";
 import type { Position, RiskLevel, TraderType, WalletAnalysis } from "@/types/domain";
 
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -149,7 +150,7 @@ export async function analyzeWallet(
       : null;
 
   const riskLevel = riskLevelFromDrawdown(maxDrawdownPct);
-  const traderType = options.traderTypeHint ?? "MANUAL_UNKNOWN";
+  const traderType = resolveTraderType(options.traderTypeHint, pnlWindow.metrics.tradeCount);
 
   const metrics = {
     ...pnlWindow.metrics,
@@ -221,11 +222,15 @@ export async function analyzeWallet(
     analyzedAt: new Date().toISOString(),
   };
 
-  await persistBestEffort(analysis, options.traderTypeHint !== undefined);
+  // Persisted whenever this run learned something concrete (a discovery
+  // hint, or our own bot-frequency heuristic firing) — never just because a
+  // hint happened to be passed in, since resolveTraderType() can also
+  // *upgrade* an unhinted analysis to BOT_SUSPECTED on trade frequency alone.
+  await persistBestEffort(analysis, analysis.metrics.traderType !== "MANUAL_UNKNOWN");
   return analysis;
 }
 
-async function persistBestEffort(analysis: WalletAnalysis, hasTraderTypeHint: boolean): Promise<void> {
+async function persistBestEffort(analysis: WalletAnalysis, shouldPersistTraderType: boolean): Promise<void> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return;
 
@@ -233,10 +238,10 @@ async function persistBestEffort(analysis: WalletAnalysis, hasTraderTypeHint: bo
     const walletsResult = await supabase.from("wallets").upsert({
       address: analysis.walletAddress,
       risk_level: analysis.metrics.riskLevel,
-      // Only overwrite trader_type when this call actually supplied a fresh
-      // hint (from discovery). A plain manual re-analysis must not clobber a
-      // trader_type discovery already established with the "no idea" default.
-      ...(hasTraderTypeHint ? { trader_type: analysis.metrics.traderType } : {}),
+      // Only overwrite trader_type when this run actually learned something
+      // — a plain re-analysis that resolves to MANUAL_UNKNOWN must not
+      // clobber a trader_type a previous run already established.
+      ...(shouldPersistTraderType ? { trader_type: analysis.metrics.traderType } : {}),
       updated_at: new Date().toISOString(),
     });
     assertNoError(walletsResult, "upserting wallets");

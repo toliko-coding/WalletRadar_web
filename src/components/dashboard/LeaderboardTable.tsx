@@ -3,6 +3,7 @@ import type { LeaderboardRow } from "@/lib/discovery/leaderboard";
 import { SmartScoreBadge } from "@/components/ui/SmartScoreBadge";
 import { PnlValue } from "@/components/ui/PnlValue";
 import { RiskBadge } from "@/components/ui/RiskBadge";
+import { TraderTypeBadge } from "@/components/ui/TraderTypeBadge";
 import { ReliabilityTag } from "@/components/ui/ReliabilityTag";
 
 function shortAddress(address: string): string {
@@ -20,7 +21,7 @@ function formatUsd(value: number | null): string {
 export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full min-w-[900px] text-sm">
+      <table className="w-full min-w-[1000px] text-sm">
         <thead>
           <tr className="border-b border-border bg-surface text-left text-xs text-muted">
             <th className="px-3 py-2 font-medium">Rank</th>
@@ -33,6 +34,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
             <th className="px-3 py-2 font-medium">Volume</th>
             <th className="px-3 py-2 font-medium">Drawdown</th>
             <th className="px-3 py-2 font-medium">Risk</th>
+            <th className="px-3 py-2 font-medium">Type</th>
           </tr>
         </thead>
         <tbody>
@@ -59,6 +61,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
                 <ReliabilityTag reliability={row.maxDrawdownReliability} />
               </td>
               <td className="px-3 py-2">{row.riskLevel ? <RiskBadge level={row.riskLevel} /> : "—"}</td>
+              <td className="px-3 py-2">{row.traderType ? <TraderTypeBadge type={row.traderType} /> : null}</td>
             </tr>
           ))}
         </tbody>

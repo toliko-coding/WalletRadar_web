@@ -3,6 +3,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { PnlValue } from "@/components/ui/PnlValue";
 import { SmartScoreBadge } from "@/components/ui/SmartScoreBadge";
 import { RiskBadge } from "@/components/ui/RiskBadge";
+import { TraderTypeBadge } from "@/components/ui/TraderTypeBadge";
 import { ReliabilityTag } from "@/components/ui/ReliabilityTag";
 import { TransactionTypeBadge } from "@/components/ui/TransactionTypeBadge";
 import { CopyButton } from "@/components/wallet/CopyButton";
@@ -42,8 +43,9 @@ export function WalletAnalysisView({ analysis }: { analysis: WalletAnalysis }) {
               View on Solscan
             </a>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-muted">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
             <RiskBadge level={metrics.riskLevel} />
+            <TraderTypeBadge type={metrics.traderType} />
             <span>
               {analysis.eligible ? "Meets Recommended criteria" : "Does not meet Recommended criteria"}
             </span>

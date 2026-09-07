@@ -269,6 +269,24 @@ async function persistBestEffort(analysis: WalletAnalysis, hasTraderTypeHint: bo
     );
     assertNoError(metricsResult, "upserting wallet_metrics");
 
+    // Append-only, unlike wallet_metrics above which overwrites in place —
+    // this is what makes "does a rising/falling Smart Score predict future
+    // performance" (§44/§62) answerable at all. Never skipped or backfilled
+    // after the fact; every real analysis run adds exactly one row.
+    const historyResult = await supabase.from("wallet_metric_history").insert({
+      wallet_address: analysis.walletAddress,
+      window_label: analysis.metrics.windowLabel,
+      smart_score: analysis.smartScore.score,
+      snapshot: {
+        metrics: analysis.metrics,
+        smartScore: analysis.smartScore,
+        eligible: analysis.eligible,
+        rejectionReason: analysis.rejectionReason,
+      },
+      snapshot_at: analysis.analyzedAt,
+    });
+    assertNoError(historyResult, "inserting wallet_metric_history");
+
     if (analysis.positions.length > 0) {
       const positionsResult = await supabase.from("wallet_positions").upsert(
         analysis.positions.map((position) => ({

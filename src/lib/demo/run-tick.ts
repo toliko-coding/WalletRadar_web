@@ -174,11 +174,17 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
   openPositions = await getOpenPositions(strategyId);
 
   // --- Entries: react to convergence signals detected after this strategy existed ---
+  // Lookback must always comfortably exceed the convergence window itself
+  // (plus a buffer) — a fixed 72h here would silently miss valid signals
+  // for any strategy configured with a wider signalWindowMinutes than that,
+  // since the window-clustering logic can only see trades this lookback
+  // actually fetched.
+  const lookbackHours = Math.max(72, Math.ceil(strategy.signalWindowMinutes / 60) + 24);
   const signals = await getConvergenceSignals({
     minWallets: strategy.minWalletsRequired,
     windowMinutes: strategy.signalWindowMinutes,
     minSmartScore: strategy.minSmartScore,
-    lookbackHours: 72,
+    lookbackHours,
   });
 
   let positionsOpened = 0;

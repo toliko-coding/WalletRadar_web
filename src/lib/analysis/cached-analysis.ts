@@ -38,6 +38,7 @@ function reconstructPosition(row: Record<string, unknown>): Position {
 function reconstructTrade(row: Record<string, unknown>): Trade {
   return {
     signature: row.tx_signature as string,
+    instructionIndex: (row.instruction_index as number) ?? 0,
     walletAddress: row.wallet_address as string,
     type: row.type as Trade["type"],
     tokenMint: row.token_mint as string,

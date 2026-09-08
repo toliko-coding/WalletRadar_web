@@ -231,7 +231,7 @@ export function WalletAnalysisView({ analysis }: { analysis: WalletAnalysis }) {
               </thead>
               <tbody>
                 {trades.map((t) => (
-                  <tr key={`${t.signature}-${t.tokenMint}`} className="border-b border-border last:border-b-0">
+                  <tr key={`${t.signature}-${t.instructionIndex}`} className="border-b border-border last:border-b-0">
                     <td className="px-3 py-2">
                       <TransactionTypeBadge type={t.type} />
                     </td>

@@ -143,9 +143,9 @@ function buildTransferRecords(
   );
   if (relevant.length === 0) return [];
 
-  return relevant.map((t) => {
+  return relevant.map((t, i) => {
     const type: TransactionType = t.toUserAccount === walletAddress ? "TRANSFER_IN" : "TRANSFER_OUT";
-    return buildTrade(tx, walletAddress, timestamp, type, t.mint, t.tokenAmount, stableUsdValue(t.tokenAmount, t.mint));
+    return buildTrade(tx, walletAddress, timestamp, type, t.mint, t.tokenAmount, stableUsdValue(t.tokenAmount, t.mint), i);
   });
 }
 
@@ -163,8 +163,8 @@ function buildNonTradeRecords(
     // still surface it in the feed as UNKNOWN/typed with a placeholder mint.
     return [buildTrade(tx, walletAddress, timestamp, type, "unknown", 0, unavailable())];
   }
-  return relevant.map((t) =>
-    buildTrade(tx, walletAddress, timestamp, type, t.mint, t.tokenAmount, stableUsdValue(t.tokenAmount, t.mint))
+  return relevant.map((t, i) =>
+    buildTrade(tx, walletAddress, timestamp, type, t.mint, t.tokenAmount, stableUsdValue(t.tokenAmount, t.mint), i)
   );
 }
 
@@ -175,7 +175,8 @@ function buildTrade(
   type: TransactionType,
   tokenMint: string,
   tokenAmount: number,
-  usdValue: ReliableValue<number>
+  usdValue: ReliableValue<number>,
+  instructionIndex = 0
 ): Trade {
   const executionPrice: ReliableValue<number> =
     usdValue.value !== null && tokenAmount > 0
@@ -184,6 +185,7 @@ function buildTrade(
 
   return {
     signature: tx.signature,
+    instructionIndex,
     walletAddress,
     type,
     tokenMint,

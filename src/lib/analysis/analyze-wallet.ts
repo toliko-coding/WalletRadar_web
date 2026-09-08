@@ -360,6 +360,7 @@ async function persistBestEffort(
         analysis.trades.map((trade) => ({
           wallet_address: analysis.walletAddress,
           tx_signature: trade.signature,
+          instruction_index: trade.instructionIndex,
           type: trade.type,
           token_mint: trade.tokenMint,
           token_symbol: trade.tokenSymbol,

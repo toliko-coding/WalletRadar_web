@@ -158,4 +158,24 @@ describe("classifyTransaction — §18 requirement: never guess buy/sell from a 
     });
     expect(classifyTransaction(tx, WALLET)).toHaveLength(0);
   });
+
+  it("assigns distinct instructionIndex values when one transaction produces multiple trade records", () => {
+    // Regression test for a real bug: a single tx touching two different
+    // tokens for the wallet produced two Trade records that both defaulted
+    // to instructionIndex 0, colliding on wallet_trades' (wallet_address,
+    // tx_signature, instruction_index) unique constraint and silently
+    // failing the ENTIRE batch upsert for that wallet (caught live against
+    // real Helius data, not from a bug report).
+    const tx = baseTx({
+      type: "TRANSFER",
+      tokenTransfers: [
+        { fromUserAccount: OTHER, toUserAccount: WALLET, tokenAmount: 10, mint: MEME_MINT },
+        { fromUserAccount: OTHER, toUserAccount: WALLET, tokenAmount: 20, mint: USDC_MINT },
+      ],
+    });
+    const trades = classifyTransaction(tx, WALLET);
+    expect(trades).toHaveLength(2);
+    expect(trades.map((t) => t.instructionIndex)).toEqual([0, 1]);
+    expect(new Set(trades.map((t) => t.instructionIndex)).size).toBe(trades.length);
+  });
 });

@@ -41,6 +41,8 @@ export type TraderType =
 
 export interface Trade {
   signature: string;
+  /** Distinguishes multiple Trade records that came from the SAME transaction signature (e.g. a transfer touching several tokens at once) — 0 for the common single-leg case. Required for wallet_trades' (wallet_address, tx_signature, instruction_index) uniqueness to actually be unique. */
+  instructionIndex: number;
   walletAddress: string;
   type: TransactionType;
   tokenMint: string;

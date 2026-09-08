@@ -238,3 +238,24 @@ export function passesTokenRiskFilters(data: TokenRiskData, filters: TokenRiskFi
   }
   return true;
 }
+
+/**
+ * Peak-to-trough drawdown across a portfolio's snapshot history (§35/§38),
+ * as a positive percentage (30 means -30%). Mirrors the same peak-tracking
+ * approach used for wallet analysis (src/lib/analysis/analyze-wallet.ts's
+ * computeMaxDrawdownPct) so "drawdown" means the same thing whether it's a
+ * real wallet or a Demo strategy. Needs at least 2 values to say anything;
+ * a single snapshot has no history to draw down from.
+ */
+export function calculateMaxDrawdownPct(totalValues: number[]): number | null {
+  if (totalValues.length < 2) return null;
+  let peak = totalValues[0];
+  let maxDrawdown = 0;
+  for (const value of totalValues) {
+    peak = Math.max(peak, value);
+    if (peak > 0) {
+      maxDrawdown = Math.max(maxDrawdown, (peak - value) / peak);
+    }
+  }
+  return peak > 0 ? maxDrawdown * 100 : null;
+}

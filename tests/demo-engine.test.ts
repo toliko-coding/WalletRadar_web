@@ -10,6 +10,7 @@ import {
   calculateTradePnl,
   calculatePortfolioValuation,
   passesTokenRiskFilters,
+  calculateMaxDrawdownPct,
 } from "@/lib/demo/engine";
 
 describe("simulateFill — anti-look-ahead / no-free-lunch (§30-32)", () => {
@@ -221,5 +222,28 @@ describe("passesTokenRiskFilters (§43)", () => {
   it("fails a token with unknown market cap when a max cap is configured", () => {
     const filters = { ...noFilters, maxMarketCapUsd: 50_000_000 };
     expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: null }, filters)).toBe(false);
+  });
+});
+
+describe("calculateMaxDrawdownPct", () => {
+  it("returns null with fewer than 2 snapshots — nothing to draw down from", () => {
+    expect(calculateMaxDrawdownPct([])).toBeNull();
+    expect(calculateMaxDrawdownPct([10_000])).toBeNull();
+  });
+
+  it("returns 0 for a monotonically increasing curve", () => {
+    expect(calculateMaxDrawdownPct([10_000, 10_500, 11_000, 12_000])).toBe(0);
+  });
+
+  it("computes the peak-to-trough drop as a positive percentage", () => {
+    // Peaks at 12,000, troughs at 9,000 -> 25% drawdown.
+    const result = calculateMaxDrawdownPct([10_000, 12_000, 9_000, 11_000]);
+    expect(result).toBeCloseTo(25);
+  });
+
+  it("tracks the worst drawdown even if the curve recovers and dips again", () => {
+    // First dip: 10,000 -> 8,000 = 20%. Second dip: 12,000 -> 6,000 = 50%. Worst wins.
+    const result = calculateMaxDrawdownPct([10_000, 8_000, 12_000, 6_000, 9_000]);
+    expect(result).toBeCloseTo(50);
   });
 });

@@ -6,6 +6,8 @@ import { DemoOverview } from "@/components/demo/DemoOverview";
 import { EquityCurveChart } from "@/components/demo/EquityCurveChart";
 import { DemoPositionsTable } from "@/components/demo/DemoPositionsTable";
 import { DemoTradesFeed } from "@/components/demo/DemoTradesFeed";
+import { StrategyComparisonTable } from "@/components/demo/StrategyComparisonTable";
+import { getStrategyComparison } from "@/lib/demo/comparison";
 import {
   listStrategies,
   getAccount,
@@ -93,16 +95,22 @@ export default async function DemoPage({
       />
 
       {strategies.length > 1 ? (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {strategies.map((s) => (
-            <Link
-              key={s.id}
-              href={`/demo?strategy=${s.id}`}
-              className={`rounded-full border px-3 py-1 ${s.id === strategy.id ? "border-accent text-accent" : "border-border text-muted hover:text-foreground"}`}
-            >
-              {s.name} {s.status === "PAUSED" ? "(paused)" : ""}
-            </Link>
-          ))}
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {strategies.map((s) => (
+              <Link
+                key={s.id}
+                href={`/demo?strategy=${s.id}`}
+                className={`rounded-full border px-3 py-1 ${s.id === strategy.id ? "border-accent text-accent" : "border-border text-muted hover:text-foreground"}`}
+              >
+                {s.name} {s.status === "PAUSED" ? "(paused)" : ""}
+              </Link>
+            ))}
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-medium text-foreground">Compare Strategies</div>
+            <StrategyComparisonTable rows={await getStrategyComparison()} />
+          </div>
         </div>
       ) : null}
 

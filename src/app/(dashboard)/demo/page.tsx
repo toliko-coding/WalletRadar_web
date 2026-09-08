@@ -7,6 +7,7 @@ import { EquityCurveChart } from "@/components/demo/EquityCurveChart";
 import { DemoPositionsTable } from "@/components/demo/DemoPositionsTable";
 import { DemoTradesFeed } from "@/components/demo/DemoTradesFeed";
 import { StrategyComparisonTable } from "@/components/demo/StrategyComparisonTable";
+import { StrategyConfigSummary } from "@/components/demo/StrategyConfigSummary";
 import { getStrategyComparison } from "@/lib/demo/comparison";
 import {
   listStrategies,
@@ -113,6 +114,8 @@ export default async function DemoPage({
           </div>
         </div>
       ) : null}
+
+      <StrategyConfigSummary strategy={strategy} />
 
       <DemoOverview
         strategy={strategy}

@@ -9,17 +9,20 @@ export function DemoActions({ strategy }: { strategy: DemoStrategy }) {
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function run(action: string, path: string) {
+  async function run(action: string, path: string, method: "POST" | "DELETE" = "POST") {
     setPending(action);
     setMessage(null);
     try {
-      const res = await fetch(path, { method: "POST" });
+      const res = await fetch(path, { method });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status})`);
       if (action === "tick") {
         setMessage(
           `Signals considered: ${json.signalsConsidered}, opened: ${json.positionsOpened}, closed: ${json.positionsClosed}, price calls: ${json.priceCallsMade}${json.errors?.length ? `, errors: ${json.errors.join("; ")}` : ""}`
         );
+      }
+      if (action === "delete") {
+        router.push("/demo");
       }
       router.refresh();
     } catch (err) {
@@ -69,6 +72,18 @@ export function DemoActions({ strategy }: { strategy: DemoStrategy }) {
         className="rounded-md border border-loss/30 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 disabled:opacity-50"
       >
         Reset
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (confirm(`Permanently delete "${strategy.name}"? This removes the strategy and all its history — unlike Reset, this cannot be undone.`)) {
+            run("delete", `/api/demo/strategies/${strategy.id}`, "DELETE");
+          }
+        }}
+        disabled={pending !== null}
+        className="rounded-md border border-loss/30 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 disabled:opacity-50"
+      >
+        Delete
       </button>
       {message ? <span className="text-xs text-muted">{message}</span> : null}
     </div>

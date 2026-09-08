@@ -183,6 +183,14 @@ export async function resetStrategy(id: string): Promise<void> {
   assertNoError(accountResult, "resetting demo account balance");
 }
 
+/** Permanently removes a strategy and everything under it (all FKs are ON DELETE CASCADE) — unlike reset, this doesn't come back. */
+export async function deleteStrategy(id: string): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return;
+  const result = await supabase.from("demo_strategies").delete().eq("id", id);
+  assertNoError(result, "deleting demo strategy");
+}
+
 export async function getOpenPositions(strategyId: string): Promise<DemoPosition[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return [];

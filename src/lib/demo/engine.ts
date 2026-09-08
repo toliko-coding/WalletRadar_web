@@ -73,9 +73,18 @@ export function exceedsMaxAllocation(
 }
 
 export interface OpenPositionForExitCheck {
-  entryPrice: number;
-  stopLossPct: number | null;
-  takeProfitPct: number | null;
+  /**
+   * Absolute prices frozen at entry (demo_positions.stop_loss_price /
+   * take_profit_price), NOT recomputed from the strategy's current
+   * stopLossPct/takeProfitPct. There's no way to edit a strategy after
+   * creation yet, so today those are numerically identical either way —
+   * but the schema clearly intends per-position values to be frozen at
+   * entry, and computing from the strategy's *current* config here would
+   * silently let a future strategy-edit retroactively change the stop-loss
+   * on positions that already opened under different terms.
+   */
+  stopLossPrice: number | null;
+  takeProfitPrice: number | null;
   maxPositionAgeHours: number | null;
   entryTime: string;
 }
@@ -98,24 +107,18 @@ export function evaluateExit(
 ): ExitEvaluation | null {
   if (currentPrice <= 0) throw new Error("currentPrice must be positive");
 
-  if (position.stopLossPct !== null) {
-    const stopPrice = position.entryPrice * (1 - position.stopLossPct / 100);
-    if (currentPrice <= stopPrice) {
-      return {
-        rule: "STOP_LOSS",
-        reason: `Price ${currentPrice} hit the stop-loss level ${stopPrice.toFixed(8)} (-${position.stopLossPct}% from entry)`,
-      };
-    }
+  if (position.stopLossPrice !== null && currentPrice <= position.stopLossPrice) {
+    return {
+      rule: "STOP_LOSS",
+      reason: `Price ${currentPrice} hit the stop-loss level ${position.stopLossPrice.toFixed(8)}`,
+    };
   }
 
-  if (position.takeProfitPct !== null) {
-    const targetPrice = position.entryPrice * (1 + position.takeProfitPct / 100);
-    if (currentPrice >= targetPrice) {
-      return {
-        rule: "TAKE_PROFIT",
-        reason: `Price ${currentPrice} hit the take-profit level ${targetPrice.toFixed(8)} (+${position.takeProfitPct}% from entry)`,
-      };
-    }
+  if (position.takeProfitPrice !== null && currentPrice >= position.takeProfitPrice) {
+    return {
+      rule: "TAKE_PROFIT",
+      reason: `Price ${currentPrice} hit the take-profit level ${position.takeProfitPrice.toFixed(8)}`,
+    };
   }
 
   if (position.maxPositionAgeHours !== null) {

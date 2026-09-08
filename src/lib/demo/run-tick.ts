@@ -102,10 +102,9 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
 
     const decision = evaluateExit(
       {
-        entryPrice: position.entryPrice,
-        stopLossPct: strategy.stopLossPct,
-        takeProfitPct: strategy.takeProfitPct,
-        maxPositionAgeHours: strategy.maxPositionAgeHours,
+        stopLossPrice: position.stopLossPrice,
+        takeProfitPrice: position.takeProfitPrice,
+        maxPositionAgeHours: position.maxPositionAgeHours,
         entryTime: position.entryTime,
       },
       currentPrice,

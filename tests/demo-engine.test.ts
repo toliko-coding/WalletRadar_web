@@ -104,10 +104,11 @@ describe("exceedsMaxAllocation", () => {
 });
 
 describe("evaluateExit", () => {
+  // Entry $100, -10% stop -> $90, +20% target -> $120 (frozen absolute
+  // prices, as they'd be stored on demo_positions at entry time).
   const base = {
-    entryPrice: 100,
-    stopLossPct: 10,
-    takeProfitPct: 20,
+    stopLossPrice: 90,
+    takeProfitPrice: 120,
     maxPositionAgeHours: 24,
     entryTime: "2026-08-11T12:00:00Z",
   };
@@ -138,7 +139,7 @@ describe("evaluateExit", () => {
   });
 
   it("ignores a null exit rule instead of treating it as an immediate trigger", () => {
-    const noRules = { ...base, stopLossPct: null, takeProfitPct: null, maxPositionAgeHours: null };
+    const noRules = { ...base, stopLossPrice: null, takeProfitPrice: null, maxPositionAgeHours: null };
     expect(evaluateExit(noRules, 1, new Date("2099-01-01T00:00:00Z"))).toBeNull();
   });
 });

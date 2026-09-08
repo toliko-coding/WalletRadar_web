@@ -57,7 +57,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
               <td className="px-3 py-2 tabular-nums">{row.tradeCount.toLocaleString()}</td>
               <td className="px-3 py-2 tabular-nums">{formatUsd(row.volumeUsd)}</td>
               <td className="px-3 py-2 tabular-nums">
-                {row.maxDrawdownPct !== null ? `-${row.maxDrawdownPct.toFixed(1)}%` : "—"}
+                {row.maxDrawdownPct !== null ? `${(-row.maxDrawdownPct).toFixed(1)}%` : "—"}
                 <ReliabilityTag reliability={row.maxDrawdownReliability} />
               </td>
               <td className="px-3 py-2">{row.riskLevel ? <RiskBadge level={row.riskLevel} /> : "—"}</td>

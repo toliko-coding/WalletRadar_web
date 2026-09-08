@@ -128,7 +128,7 @@ export function WalletAnalysisView({ analysis }: { analysis: WalletAnalysis }) {
           value={
             <>
               {metrics.maxDrawdownPct.value !== null
-                ? `-${metrics.maxDrawdownPct.value.toFixed(1)}%`
+                ? `${(-metrics.maxDrawdownPct.value).toFixed(1)}%`
                 : "Unavailable"}
               <ReliabilityTag reliability={metrics.maxDrawdownPct.reliability} />
             </>

@@ -50,7 +50,7 @@ export function StrategyComparisonTable({ rows }: { rows: StrategyComparisonRow[
                   {formatPct(alphaVsSol)}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted">
-                  {row.maxDrawdownPct !== null ? `-${row.maxDrawdownPct.toFixed(1)}%` : "—"}
+                  {row.maxDrawdownPct !== null ? `${(-row.maxDrawdownPct).toFixed(1)}%` : "—"}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{formatPct(row.winRatePct)}</td>
                 <td className="px-3 py-2 tabular-nums">{row.profitFactor !== null ? row.profitFactor.toFixed(2) : "—"}</td>

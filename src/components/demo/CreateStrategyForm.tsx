@@ -18,6 +18,9 @@ export function CreateStrategyForm() {
   const [takeProfitPct, setTakeProfitPct] = useState<number | "">(20);
   const [maxPositionAgeHours, setMaxPositionAgeHours] = useState<number | "">(72);
   const [simulatedSlippagePct, setSimulatedSlippagePct] = useState(0.5);
+  const [minTokenLiquidityUsd, setMinTokenLiquidityUsd] = useState<number | "">("");
+  const [minMarketCapUsd, setMinMarketCapUsd] = useState<number | "">("");
+  const [maxMarketCapUsd, setMaxMarketCapUsd] = useState<number | "">("");
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -39,6 +42,9 @@ export function CreateStrategyForm() {
           takeProfitPct: takeProfitPct === "" ? null : takeProfitPct,
           maxPositionAgeHours: maxPositionAgeHours === "" ? null : maxPositionAgeHours,
           simulatedSlippagePct,
+          minTokenLiquidityUsd: minTokenLiquidityUsd === "" ? null : minTokenLiquidityUsd,
+          minMarketCapUsd: minMarketCapUsd === "" ? null : minMarketCapUsd,
+          maxMarketCapUsd: maxMarketCapUsd === "" ? null : maxMarketCapUsd,
         }),
       });
       if (!res.ok) {
@@ -161,6 +167,46 @@ export function CreateStrategyForm() {
             className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
           />
         </label>
+      </div>
+
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="text-xs font-medium text-foreground">Token Risk Filters (§43, optional)</div>
+        <p className="mt-1 text-xs text-muted">
+          Skip a signal entirely rather than paper-buy it when the token&apos;s liquidity/market
+          cap can&apos;t be verified against these — never assumed fine when unknown.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <label className="text-xs">
+            <div className="mb-1 text-muted">Min Liquidity ($, optional)</div>
+            <input
+              type="number"
+              value={minTokenLiquidityUsd}
+              onChange={(e) => setMinTokenLiquidityUsd(e.target.value === "" ? "" : Number(e.target.value))}
+              placeholder="No minimum"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            />
+          </label>
+          <label className="text-xs">
+            <div className="mb-1 text-muted">Min Market Cap ($, optional)</div>
+            <input
+              type="number"
+              value={minMarketCapUsd}
+              onChange={(e) => setMinMarketCapUsd(e.target.value === "" ? "" : Number(e.target.value))}
+              placeholder="No minimum"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            />
+          </label>
+          <label className="text-xs">
+            <div className="mb-1 text-muted">Max Market Cap ($, optional)</div>
+            <input
+              type="number"
+              value={maxMarketCapUsd}
+              onChange={(e) => setMaxMarketCapUsd(e.target.value === "" ? "" : Number(e.target.value))}
+              placeholder="No maximum"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            />
+          </label>
+        </div>
       </div>
 
       <button

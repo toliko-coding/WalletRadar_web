@@ -14,6 +14,8 @@ import {
   evaluateExit,
   calculateTradePnl,
   calculatePortfolioValuation,
+  passesTokenRiskFilters,
+  type TokenRiskData,
 } from "./engine";
 import { getStrategy, getAccount, getOpenPositions, getClosedPositions } from "./strategies";
 
@@ -51,6 +53,24 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
       errors.push(`price lookup for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
       priceCache.set(mint, null);
       return null;
+    }
+  }
+
+  const riskDataCache = new Map<string, TokenRiskData>();
+  async function getRiskData(mint: string): Promise<TokenRiskData> {
+    const cached = riskDataCache.get(mint);
+    if (cached) return cached;
+    try {
+      const { liquidityUsd, marketCapUsd } = await birdeyeMarketData.getTokenLiquidity(mint);
+      priceCallsMade += 1;
+      const data = { liquidityUsd, marketCapUsd };
+      riskDataCache.set(mint, data);
+      return data;
+    } catch (err) {
+      errors.push(`liquidity/market cap lookup for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
+      const data = { liquidityUsd: null, marketCapUsd: null };
+      riskDataCache.set(mint, data);
+      return data;
     }
   }
 
@@ -182,6 +202,24 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     if (!canOpenNewPosition(openPositionCount, strategy.maxOpenPositions)) break;
     if (exceedsMaxAllocation(0, strategy.virtualBuySizeUsd, approxPortfolioValueUsd, strategy.maxAllocationPctPerToken)) continue;
     if (account.cashBalanceUsd < strategy.virtualBuySizeUsd) continue; // out of virtual cash
+
+    // §43 — don't blindly paper-buy every token a wallet touches. Only
+    // fetched when the strategy actually configured a filter, so a strategy
+    // with none of these set costs nothing extra here.
+    const hasRiskFilters =
+      strategy.minTokenLiquidityUsd !== null || strategy.minMarketCapUsd !== null || strategy.maxMarketCapUsd !== null;
+    if (hasRiskFilters) {
+      const riskData = await getRiskData(signal.tokenMint);
+      if (
+        !passesTokenRiskFilters(riskData, {
+          minTokenLiquidityUsd: strategy.minTokenLiquidityUsd,
+          minMarketCapUsd: strategy.minMarketCapUsd,
+          maxMarketCapUsd: strategy.maxMarketCapUsd,
+        })
+      ) {
+        continue;
+      }
+    }
 
     const currentPrice = await getPrice(signal.tokenMint);
     if (currentPrice === null) continue; // never fabricate an entry price

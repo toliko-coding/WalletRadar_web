@@ -91,4 +91,7 @@ export interface CreateStrategyInput {
   maxPositionAgeHours?: number | null;
   simulatedSlippagePct?: number;
   feePct?: number;
+  minTokenLiquidityUsd?: number | null;
+  minMarketCapUsd?: number | null;
+  maxMarketCapUsd?: number | null;
 }

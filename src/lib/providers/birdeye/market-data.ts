@@ -13,6 +13,7 @@ interface TokenOverviewResponse {
   name: string | null;
   decimals: number | null;
   liquidity: number | null;
+  marketCap: number | null;
 }
 
 export const birdeyeMarketData: MarketDataProvider = {
@@ -29,7 +30,7 @@ export const birdeyeMarketData: MarketDataProvider = {
         query: { address: tokenMint },
       })
     );
-    return { liquidityUsd: data?.liquidity ?? null };
+    return { liquidityUsd: data?.liquidity ?? null, marketCapUsd: data?.marketCap ?? null };
   },
 };
 

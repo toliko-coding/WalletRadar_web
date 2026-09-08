@@ -9,6 +9,7 @@ import {
   evaluateExit,
   calculateTradePnl,
   calculatePortfolioValuation,
+  passesTokenRiskFilters,
 } from "@/lib/demo/engine";
 
 describe("simulateFill — anti-look-ahead / no-free-lunch (§30-32)", () => {
@@ -185,5 +186,40 @@ describe("calculatePortfolioValuation", () => {
   it("returns 0 ROI rather than dividing by zero when starting capital is 0", () => {
     const result = calculatePortfolioValuation(0, 0, [], []);
     expect(result.roiPct).toBe(0);
+  });
+});
+
+describe("passesTokenRiskFilters (§43)", () => {
+  const noFilters = { minTokenLiquidityUsd: null, minMarketCapUsd: null, maxMarketCapUsd: null };
+
+  it("passes anything when no filters are configured", () => {
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: null }, noFilters)).toBe(true);
+  });
+
+  it("passes a token meeting the minimum liquidity requirement", () => {
+    const filters = { ...noFilters, minTokenLiquidityUsd: 50_000 };
+    expect(passesTokenRiskFilters({ liquidityUsd: 100_000, marketCapUsd: null }, filters)).toBe(true);
+  });
+
+  it("fails a token below the minimum liquidity requirement", () => {
+    const filters = { ...noFilters, minTokenLiquidityUsd: 50_000 };
+    expect(passesTokenRiskFilters({ liquidityUsd: 10_000, marketCapUsd: null }, filters)).toBe(false);
+  });
+
+  it("fails a token with unknown liquidity when a minimum is configured — never assumes it's fine", () => {
+    const filters = { ...noFilters, minTokenLiquidityUsd: 50_000 };
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: null }, filters)).toBe(false);
+  });
+
+  it("enforces both a minimum and maximum market cap band", () => {
+    const filters = { ...noFilters, minMarketCapUsd: 1_000_000, maxMarketCapUsd: 50_000_000 };
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: 10_000_000 }, filters)).toBe(true);
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: 500_000 }, filters)).toBe(false); // too small
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: 60_000_000 }, filters)).toBe(false); // too large
+  });
+
+  it("fails a token with unknown market cap when a max cap is configured", () => {
+    const filters = { ...noFilters, maxMarketCapUsd: 50_000_000 };
+    expect(passesTokenRiskFilters({ liquidityUsd: null, marketCapUsd: null }, filters)).toBe(false);
   });
 });

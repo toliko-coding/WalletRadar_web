@@ -203,3 +203,38 @@ export function calculatePortfolioValuation(
     roiPct,
   };
 }
+
+export interface TokenRiskFilters {
+  minTokenLiquidityUsd: number | null;
+  minMarketCapUsd: number | null;
+  maxMarketCapUsd: number | null;
+}
+
+export interface TokenRiskData {
+  liquidityUsd: number | null;
+  marketCapUsd: number | null;
+}
+
+/**
+ * §43 — a strategy shouldn't blindly paper-buy every token a wallet
+ * touches. A null filter field means "no constraint configured". Unlike the
+ * leaderboard's null-passes-through filters (src/lib/discovery/
+ * query-filters.ts, where an unmeasured metric shouldn't hide an otherwise
+ * good wallet), a null *data* field here — liquidity/market cap the
+ * provider couldn't return — FAILS an active filter instead of passing it:
+ * this gates a live paper-trade entry, and "we can't verify this token's
+ * liquidity" is itself the kind of risk §43 exists to screen out, not a
+ * reason to shrug and let it through.
+ */
+export function passesTokenRiskFilters(data: TokenRiskData, filters: TokenRiskFilters): boolean {
+  if (filters.minTokenLiquidityUsd !== null) {
+    if (data.liquidityUsd === null || data.liquidityUsd < filters.minTokenLiquidityUsd) return false;
+  }
+  if (filters.minMarketCapUsd !== null) {
+    if (data.marketCapUsd === null || data.marketCapUsd < filters.minMarketCapUsd) return false;
+  }
+  if (filters.maxMarketCapUsd !== null) {
+    if (data.marketCapUsd === null || data.marketCapUsd > filters.maxMarketCapUsd) return false;
+  }
+  return true;
+}

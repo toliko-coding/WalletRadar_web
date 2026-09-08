@@ -110,6 +110,9 @@ export async function createStrategy(input: CreateStrategyInput): Promise<DemoSt
       max_position_age_hours: input.maxPositionAgeHours ?? null,
       simulated_slippage_pct: input.simulatedSlippagePct ?? DEFAULTS.simulatedSlippagePct,
       fee_pct: input.feePct ?? DEFAULTS.feePct,
+      min_token_liquidity_usd: input.minTokenLiquidityUsd ?? null,
+      min_market_cap_usd: input.minMarketCapUsd ?? null,
+      max_market_cap_usd: input.maxMarketCapUsd ?? null,
     })
     .select()
     .single();

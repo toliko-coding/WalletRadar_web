@@ -55,7 +55,8 @@ export interface TransactionProvider {
 
 export interface MarketDataProvider {
   getTokenPrice(tokenMint: string): Promise<{ priceUsd: number | null }>;
-  getTokenLiquidity(tokenMint: string): Promise<{ liquidityUsd: number | null }>;
+  /** Liquidity and market cap come from the same underlying provider call — always fetched together, never two calls. */
+  getTokenLiquidity(tokenMint: string): Promise<{ liquidityUsd: number | null; marketCapUsd: number | null }>;
 }
 
 export interface TokenMetadataProvider {

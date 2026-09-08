@@ -6,10 +6,17 @@ function formatUsd(value: number): string {
   return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
-function formatPct(value: number | null): string {
+/** For deltas (ROI, alpha vs. benchmark) where a leading "+" distinguishes above/below zero. */
+function formatSignedPct(value: number | null): string {
   if (value === null) return "—";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(1)}%`;
+}
+
+/** For plain magnitudes (win rate) that are never negative and shouldn't carry a "+". */
+function formatPlainPct(value: number | null): string {
+  if (value === null) return "—";
+  return `${value.toFixed(1)}%`;
 }
 
 /** §38 — compares strategies with different discovery/convergence criteria side by side. */
@@ -45,14 +52,14 @@ export function StrategyComparisonTable({ rows }: { rows: StrategyComparisonRow[
                 <td className={`px-3 py-2 tabular-nums ${row.totalPnlUsd >= 0 ? "text-profit" : "text-loss"}`}>
                   {formatUsd(row.totalPnlUsd)}
                 </td>
-                <td className={`px-3 py-2 tabular-nums ${row.roiPct >= 0 ? "text-profit" : "text-loss"}`}>{formatPct(row.roiPct)}</td>
+                <td className={`px-3 py-2 tabular-nums ${row.roiPct >= 0 ? "text-profit" : "text-loss"}`}>{formatSignedPct(row.roiPct)}</td>
                 <td className={`px-3 py-2 tabular-nums ${alphaVsSol !== null && alphaVsSol >= 0 ? "text-profit" : alphaVsSol !== null ? "text-loss" : "text-muted"}`}>
-                  {formatPct(alphaVsSol)}
+                  {formatSignedPct(alphaVsSol)}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted">
                   {row.maxDrawdownPct !== null ? `${(-row.maxDrawdownPct).toFixed(1)}%` : "—"}
                 </td>
-                <td className="px-3 py-2 tabular-nums">{formatPct(row.winRatePct)}</td>
+                <td className="px-3 py-2 tabular-nums">{formatPlainPct(row.winRatePct)}</td>
                 <td className="px-3 py-2 tabular-nums">{row.profitFactor !== null ? row.profitFactor.toFixed(2) : "—"}</td>
                 <td className="px-3 py-2 tabular-nums text-muted">
                   {row.closedTradeCount} closed / {row.openPositionCount} open

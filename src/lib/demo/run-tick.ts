@@ -19,12 +19,19 @@ import {
 } from "./engine";
 import { getStrategy, getAccount, getOpenPositions, getClosedPositions } from "./strategies";
 
+export interface SkippedSignal {
+  tokenMint: string;
+  tokenSymbol: string | null;
+  reason: string;
+}
+
 export interface DemoTickResult {
   strategyId: string;
   signalsConsidered: number;
   positionsOpened: number;
   positionsClosed: number;
   priceCallsMade: number;
+  skippedSignals: SkippedSignal[];
   errors: string[];
 }
 
@@ -75,20 +82,20 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
   }
 
   if (!supabase) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, errors: ["Supabase is not configured"] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: ["Supabase is not configured"] };
   }
 
   const strategy = await getStrategy(strategyId);
   if (!strategy) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, errors: [`Strategy ${strategyId} not found`] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: [`Strategy ${strategyId} not found`] };
   }
   if (strategy.status !== "ACTIVE") {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, errors: ["Strategy is paused"] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: ["Strategy is paused"] };
   }
 
   let account = await getAccount(strategyId);
   if (!account) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, errors: [`No demo_accounts row for strategy ${strategyId}`] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: [`No demo_accounts row for strategy ${strategyId}`] };
   }
 
   let openPositions = await getOpenPositions(strategyId);
@@ -196,17 +203,40 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
   // a deliberate accuracy/API-cost trade-off, not an oversight.
   const approxPortfolioValueUsd = account.cashBalanceUsd + openPositionCount * strategy.virtualBuySizeUsd;
 
+  // Surfaced to the UI so a strategy that opens nothing isn't a silent black
+  // box — every signal the pipeline actually found is accounted for, either
+  // as an opened position or a skip with a concrete reason.
+  const skippedSignals: SkippedSignal[] = [];
+  function skip(signal: (typeof signals)[number], reason: string) {
+    skippedSignals.push({ tokenMint: signal.tokenMint, tokenSymbol: signal.tokenSymbol, reason });
+  }
+
   for (const signal of signals) {
     // "Detection time" is the instant this tick actually processes the
     // signal — the one honest anti-look-ahead check available without a
     // continuous monitoring loop (Phase 1G): a strategy created after this
     // tick would run could never have produced this position.
     const detectionTime = now.toISOString();
-    if (!isSignalEligible(detectionTime, strategy.createdAt)) continue;
-    if (openTokens.has(signal.tokenMint)) continue; // already holding this token — don't stack a second position on the same live signal
-    if (!canOpenNewPosition(openPositionCount, strategy.maxOpenPositions)) break;
-    if (exceedsMaxAllocation(0, strategy.virtualBuySizeUsd, approxPortfolioValueUsd, strategy.maxAllocationPctPerToken)) continue;
-    if (account.cashBalanceUsd < strategy.virtualBuySizeUsd) continue; // out of virtual cash
+    if (!isSignalEligible(detectionTime, strategy.createdAt)) {
+      skip(signal, "signal predates this strategy's creation (no backdating)");
+      continue;
+    }
+    if (openTokens.has(signal.tokenMint)) {
+      skip(signal, "already holding an open position in this token");
+      continue;
+    }
+    if (!canOpenNewPosition(openPositionCount, strategy.maxOpenPositions)) {
+      skip(signal, `max open positions reached (${strategy.maxOpenPositions})`);
+      continue;
+    }
+    if (exceedsMaxAllocation(0, strategy.virtualBuySizeUsd, approxPortfolioValueUsd, strategy.maxAllocationPctPerToken)) {
+      skip(signal, `would exceed max allocation per token (${strategy.maxAllocationPctPerToken}%)`);
+      continue;
+    }
+    if (account.cashBalanceUsd < strategy.virtualBuySizeUsd) {
+      skip(signal, "insufficient virtual cash");
+      continue;
+    }
 
     // §43 — don't blindly paper-buy every token a wallet touches. Only
     // fetched when the strategy actually configured a filter, so a strategy
@@ -222,12 +252,16 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
           maxMarketCapUsd: strategy.maxMarketCapUsd,
         })
       ) {
+        skip(signal, "failed token risk filters (liquidity/market cap)");
         continue;
       }
     }
 
     const currentPrice = await getPrice(signal.tokenMint);
-    if (currentPrice === null) continue; // never fabricate an entry price
+    if (currentPrice === null) {
+      skip(signal, "no live price available"); // never fabricate an entry price
+      continue;
+    }
 
     try {
       const fill = simulateFill(currentPrice, strategy.simulatedSlippagePct, "BUY");
@@ -362,6 +396,7 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     positionsOpened,
     positionsClosed,
     priceCallsMade,
+    skippedSignals,
     errors,
   };
 }

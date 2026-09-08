@@ -1,4 +1,5 @@
 import { isBirdeyeConfigured, isHeliusConfigured, isSupabaseConfigured } from "@/lib/env";
+import { WalletSearchBox } from "@/components/layout/WalletSearchBox";
 
 function StatusPill({ label, connected }: { label: string; connected: boolean }) {
   return (
@@ -20,6 +21,7 @@ export function TopBar() {
         Solana wallet intelligence &amp; paper-trading research
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <WalletSearchBox />
         <StatusPill label="Birdeye" connected={isBirdeyeConfigured()} />
         <StatusPill label="Helius" connected={isHeliusConfigured()} />
         <StatusPill label="Supabase" connected={isSupabaseConfigured()} />

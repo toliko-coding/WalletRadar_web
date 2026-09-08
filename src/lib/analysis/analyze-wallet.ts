@@ -6,9 +6,10 @@ import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { assertNoError } from "@/lib/supabase/assert";
 import { RECOMMENDED_EXCLUDED_TRADER_TYPES } from "@/lib/discovery/trader-type";
 import { resolveTraderType } from "@/lib/discovery/bot-detection";
+import { isValidSolanaAddress } from "@/lib/solana/address";
 import type { Position, RiskLevel, TraderType, WalletAnalysis } from "@/types/domain";
 
-const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export { isValidSolanaAddress };
 
 // Recommended preset defaults (§6/7) — the only preset available until the
 // filters panel (Phase 1E/1F) exists. Applied here purely as an informational
@@ -29,10 +30,6 @@ export interface AnalyzeWalletOptions {
    * visits) have no such hint and default to MANUAL_UNKNOWN, same as before.
    */
   traderTypeHint?: TraderType;
-}
-
-export function isValidSolanaAddress(address: string): boolean {
-  return SOLANA_ADDRESS_RE.test(address);
 }
 
 function daysAgo(iso: string | null): number | null {

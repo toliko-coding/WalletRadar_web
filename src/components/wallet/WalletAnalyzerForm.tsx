@@ -2,8 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-
-const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+import { isValidSolanaAddress } from "@/lib/solana/address";
 
 export function WalletAnalyzerForm() {
   const router = useRouter();
@@ -13,7 +12,7 @@ export function WalletAnalyzerForm() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = address.trim();
-    if (!SOLANA_ADDRESS_RE.test(trimmed)) {
+    if (!isValidSolanaAddress(trimmed)) {
       setError("Enter a valid Solana wallet address (base58, 32–44 characters).");
       return;
     }

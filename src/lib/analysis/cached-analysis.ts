@@ -96,7 +96,11 @@ export async function getCachedAnalysis(
   };
 
   const [{ data: positionRows }, { data: tradeRows }] = await Promise.all([
-    supabase.from("wallet_positions").select("*").eq("wallet_address", walletAddress),
+    // Defensive .gt filter — analyzeWallet() now actively deletes a
+    // position's row once a wallet fully exits it (see analyze-wallet.ts),
+    // but this guards against any row that went stale before that fix
+    // existed, or any future write path that doesn't do the same cleanup.
+    supabase.from("wallet_positions").select("*").eq("wallet_address", walletAddress).gt("quantity", 0),
     supabase
       .from("wallet_trades")
       .select("*")

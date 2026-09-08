@@ -123,15 +123,25 @@ export async function analyzeWallet(
   // transient error, etc.) must never take down the whole analysis. Only
   // getWalletPnL is allowed to throw: without it there's nothing useful to
   // show anyway, and the caller (Route Handler / page) surfaces that clearly.
-  const [pnlWindow, rawPositions, profitByToken, chartPoints, trades] = await Promise.all([
+  const [pnlWindow, balancesResult, profitByToken, chartPoints, trades] = await Promise.all([
     birdeyeWalletAnalytics.getWalletPnL(walletAddress, windowLabel),
-    birdeyeWalletAnalytics.getWalletBalances(walletAddress).catch(() => []),
+    // Tracked as null-on-failure rather than folded into `.catch(() => [])`
+    // like the others: an empty array here is later used to decide which
+    // wallet_positions rows are stale and should be deleted (see
+    // persistBestEffort below), and "the call failed" must never be
+    // mistaken for "this wallet genuinely holds nothing" — that distinction
+    // is the difference between correct cleanup and wiping out real data on
+    // a transient error.
+    birdeyeWalletAnalytics
+      .getWalletBalances(walletAddress)
+      .then((value) => ({ value, succeeded: true as const }))
+      .catch(() => ({ value: [], succeeded: false as const })),
     birdeyeWalletAnalytics.getWalletProfitByToken(walletAddress).catch(() => []),
     getWalletPnlChart(walletAddress).catch(() => []),
     heliusTransactions.getWalletTransactions(walletAddress, { limit: 50 }).catch(() => []),
   ]);
 
-  const positions = enrichPositionsWithTradeTimestamps(rawPositions, trades);
+  const positions = enrichPositionsWithTradeTimestamps(balancesResult.value, trades);
   const enrichedTrades = enrichTradeSymbols(trades, profitByToken);
   const { pct: profitConcentrationPct, tokenSymbol: concentrationTokenSymbol } =
     computeProfitConcentration(profitByToken);
@@ -226,11 +236,15 @@ export async function analyzeWallet(
   // hint, or our own bot-frequency heuristic firing) — never just because a
   // hint happened to be passed in, since resolveTraderType() can also
   // *upgrade* an unhinted analysis to BOT_SUSPECTED on trade frequency alone.
-  await persistBestEffort(analysis, analysis.metrics.traderType !== "MANUAL_UNKNOWN");
+  await persistBestEffort(analysis, analysis.metrics.traderType !== "MANUAL_UNKNOWN", balancesResult.succeeded);
   return analysis;
 }
 
-async function persistBestEffort(analysis: WalletAnalysis, shouldPersistTraderType: boolean): Promise<void> {
+async function persistBestEffort(
+  analysis: WalletAnalysis,
+  shouldPersistTraderType: boolean,
+  balancesFetchSucceeded: boolean
+): Promise<void> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return;
 
@@ -317,6 +331,28 @@ async function persistBestEffort(analysis: WalletAnalysis, shouldPersistTraderTy
         { onConflict: "wallet_address,token_mint" }
       );
       assertNoError(positionsResult, "upserting wallet_positions");
+    }
+
+    // Birdeye's balances response only ever includes currently-held tokens
+    // (holding > 0) — it never sends a token back with quantity 0 once a
+    // wallet fully exits it. Without this, a previously-recorded position's
+    // row would sit in the table forever showing its last-known non-zero
+    // quantity, long after the wallet actually closed it out — a stale
+    // "phantom position" bug found by reading the persistence logic, not
+    // yet observed live, but certain to hit any actively-trading wallet
+    // re-analyzed more than once.
+    //
+    // Only runs when the balances fetch actually succeeded this run — an
+    // empty `analysis.positions` from a *failed* fetch must never be read as
+    // "this wallet now holds nothing" and used to wipe out real rows.
+    if (balancesFetchSucceeded) {
+      const currentTokenMints = analysis.positions.map((p) => p.tokenMint);
+      const staleDeleteQuery = supabase.from("wallet_positions").delete().eq("wallet_address", analysis.walletAddress);
+      const staleResult =
+        currentTokenMints.length > 0
+          ? await staleDeleteQuery.not("token_mint", "in", `(${currentTokenMints.join(",")})`)
+          : await staleDeleteQuery;
+      assertNoError(staleResult, "clearing stale wallet_positions");
     }
 
     if (analysis.trades.length > 0) {

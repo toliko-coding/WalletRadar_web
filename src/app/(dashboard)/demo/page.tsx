@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CreateStrategyForm } from "@/components/demo/CreateStrategyForm";
+import { NewStrategyPanel } from "@/components/demo/NewStrategyPanel";
 import { DemoActions } from "@/components/demo/DemoActions";
 import { DemoOverview } from "@/components/demo/DemoOverview";
 import { EquityCurveChart } from "@/components/demo/EquityCurveChart";
@@ -95,25 +96,28 @@ export default async function DemoPage({
         actions={<DemoActions strategy={strategy} />}
       />
 
-      {strategies.length > 1 ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {strategies.map((s) => (
-              <Link
-                key={s.id}
-                href={`/demo?strategy=${s.id}`}
-                className={`rounded-full border px-3 py-1 ${s.id === strategy.id ? "border-accent text-accent" : "border-border text-muted hover:text-foreground"}`}
-              >
-                {s.name} {s.status === "PAUSED" ? "(paused)" : ""}
-              </Link>
-            ))}
-          </div>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {strategies.length > 1
+            ? strategies.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/demo?strategy=${s.id}`}
+                  className={`rounded-full border px-3 py-1 ${s.id === strategy.id ? "border-accent text-accent" : "border-border text-muted hover:text-foreground"}`}
+                >
+                  {s.name} {s.status === "PAUSED" ? "(paused)" : ""}
+                </Link>
+              ))
+            : null}
+        </div>
+        <NewStrategyPanel />
+        {strategies.length > 1 ? (
           <div>
             <div className="mb-2 text-sm font-medium text-foreground">Compare Strategies</div>
             <StrategyComparisonTable rows={await getStrategyComparison()} />
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <StrategyConfigSummary strategy={strategy} />
 

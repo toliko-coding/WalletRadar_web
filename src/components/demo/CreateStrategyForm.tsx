@@ -47,9 +47,12 @@ export function CreateStrategyForm() {
           maxMarketCapUsd: maxMarketCapUsd === "" ? null : maxMarketCapUsd,
         }),
       });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? `Request failed (${res.status})`);
+      }
+      if (json.id) {
+        router.push(`/demo?strategy=${json.id}`);
       }
       router.refresh();
     } catch (err) {

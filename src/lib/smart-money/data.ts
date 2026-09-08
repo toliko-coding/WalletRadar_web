@@ -2,6 +2,20 @@ import "server-only";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { detectConvergenceSignals, type ConvergenceSignal, type TrackedBuy } from "./detect-convergence";
 import { RECOMMENDED_EXCLUDED_TRADER_TYPES } from "@/lib/discovery/trader-type";
+import { WRAPPED_SOL_MINT, STABLECOIN_MINTS } from "@/lib/classification/classify-transaction";
+
+/**
+ * Base/quote assets (SOL, stablecoins) are excluded as convergence *targets*.
+ * classifyTransaction() can legitimately tag a direct SOL/USDC swap as a
+ * DEX_SWAP_BUY of SOL (see its quote-priority comment), but two wallets both
+ * buying SOL in the same window says nothing about shared conviction in a
+ * specific project — it's the single most common trade on the network and
+ * will collide by chance constantly. Found live: a genuine 2-wallet PUMP
+ * convergence signal was accompanied by a same-window "convergence" on
+ * wrapped SOL from the exact same two wallets, which would otherwise have
+ * looked identical to a real signal.
+ */
+const EXCLUDED_TARGET_MINTS = new Set([WRAPPED_SOL_MINT, ...STABLECOIN_MINTS]);
 
 export interface SmartMoneyCriteria {
   minWallets: number;
@@ -60,14 +74,16 @@ export async function getConvergenceSignals(criteria: SmartMoneyCriteria): Promi
     .eq("type", "DEX_SWAP_BUY")
     .gte("occurred_at", cutoff);
 
-  const buys: TrackedBuy[] = (trades ?? []).map((t) => ({
-    walletAddress: t.wallet_address as string,
-    tokenMint: t.token_mint as string,
-    tokenSymbol: t.token_symbol as string | null,
-    occurredAt: t.occurred_at as string,
-    usdValue: t.usd_value as number | null,
-    smartScore: scoreByWallet.get(t.wallet_address as string) ?? null,
-  }));
+  const buys: TrackedBuy[] = (trades ?? [])
+    .filter((t) => !EXCLUDED_TARGET_MINTS.has(t.token_mint as string))
+    .map((t) => ({
+      walletAddress: t.wallet_address as string,
+      tokenMint: t.token_mint as string,
+      tokenSymbol: t.token_symbol as string | null,
+      occurredAt: t.occurred_at as string,
+      usdValue: t.usd_value as number | null,
+      smartScore: scoreByWallet.get(t.wallet_address as string) ?? null,
+    }));
 
   return detectConvergenceSignals(buys, {
     minWallets: criteria.minWallets,

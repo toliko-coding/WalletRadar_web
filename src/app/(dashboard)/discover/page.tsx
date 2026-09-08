@@ -2,7 +2,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { WalletAnalyzerForm } from "@/components/wallet/WalletAnalyzerForm";
 import { DiscoveryActions } from "@/components/discover/DiscoveryActions";
-import { getDiscoveryStats } from "@/lib/discovery/stats";
+import { JobRunHistory } from "@/components/discover/JobRunHistory";
+import { getDiscoveryStats, getRecentJobRuns } from "@/lib/discovery/stats";
 import { isSupabaseConfigured } from "@/lib/env";
 
 // Same reasoning as /dashboard: these stats and job-run timestamps change
@@ -25,7 +26,7 @@ function formatTimeAgo(iso: string | null): string {
 }
 
 export default async function DiscoverPage() {
-  const stats = await getDiscoveryStats();
+  const [stats, jobRuns] = await Promise.all([getDiscoveryStats(), getRecentJobRuns()]);
 
   return (
     <div className="space-y-6">
@@ -48,6 +49,11 @@ export default async function DiscoverPage() {
       </div>
 
       <DiscoveryActions />
+
+      <div>
+        <div className="mb-2 text-sm font-medium text-foreground">Recent Job Runs</div>
+        <JobRunHistory runs={jobRuns} />
+      </div>
 
       <WalletAnalyzerForm />
     </div>

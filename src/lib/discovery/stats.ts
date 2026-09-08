@@ -54,3 +54,35 @@ export async function getDiscoveryStats(): Promise<DiscoveryStats> {
     lastAnalysisRunAt: (lastAnalysisRun.data?.completed_at as string | undefined) ?? null,
   };
 }
+
+export interface JobRunRecord {
+  jobName: string;
+  startedAt: string;
+  completedAt: string | null;
+  status: string;
+  processedItems: number;
+  durationMs: number | null;
+  errors: string[] | null;
+}
+
+/** Powers a job-run history view — previously only the single latest timestamp per job was visible anywhere, even though every run (with its errors) has been recorded in job_runs all along. */
+export async function getRecentJobRuns(limit = 15): Promise<JobRunRecord[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const { data } = await supabase
+    .from("job_runs")
+    .select("job_name, started_at, completed_at, status, processed_items, duration_ms, errors")
+    .order("started_at", { ascending: false })
+    .limit(limit);
+
+  return (data ?? []).map((row) => ({
+    jobName: row.job_name as string,
+    startedAt: row.started_at as string,
+    completedAt: row.completed_at as string | null,
+    status: row.status as string,
+    processedItems: (row.processed_items as number) ?? 0,
+    durationMs: row.duration_ms as number | null,
+    errors: row.errors as string[] | null,
+  }));
+}

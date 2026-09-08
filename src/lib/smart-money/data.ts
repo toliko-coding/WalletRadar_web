@@ -1,6 +1,7 @@
 import "server-only";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { detectConvergenceSignals, type ConvergenceSignal, type TrackedBuy } from "./detect-convergence";
+import { RECOMMENDED_EXCLUDED_TRADER_TYPES } from "@/lib/discovery/trader-type";
 
 export interface SmartMoneyCriteria {
   minWallets: number;
@@ -23,6 +24,16 @@ export const DEFAULT_SMART_MONEY_CRITERIA: SmartMoneyCriteria = {
  * that requires the real-time webhook monitoring of Phase 1G, which doesn't
  * exist yet. This is a smaller, honest claim: convergence among wallets
  * we've actually scored, computed retrospectively from stored trades.
+ *
+ * Developer/bundler/insider-tagged wallets are excluded from the tracked
+ * pool outright (same list as the Recommended preset's eligibility
+ * exclusion — see src/lib/discovery/trader-type.ts), not just penalized:
+ * found by live-testing against a real token whose entire top-traders list
+ * was tagged "bundler" by Birdeye. Several coordinated wallets buying the
+ * same token in a bundle is the opposite of independent smart-money
+ * conviction — it's the exact manipulation pattern §6 calls out, and
+ * nothing here was previously screening it out of convergence signals
+ * (only the /dashboard leaderboard's eligibility flag was).
  */
 export async function getConvergenceSignals(criteria: SmartMoneyCriteria): Promise<ConvergenceSignal[]> {
   const supabase = getSupabaseServiceClient();
@@ -30,9 +41,10 @@ export async function getConvergenceSignals(criteria: SmartMoneyCriteria): Promi
 
   const { data: trackedWallets } = await supabase
     .from("wallet_metrics")
-    .select("wallet_address, smart_score")
+    .select("wallet_address, smart_score, wallets!inner(trader_type)")
     .eq("window_label", "90D")
-    .gte("smart_score", criteria.minSmartScore);
+    .gte("smart_score", criteria.minSmartScore)
+    .not("wallets.trader_type", "in", `(${RECOMMENDED_EXCLUDED_TRADER_TYPES.join(",")})`);
 
   const scoreByWallet = new Map<string, number>(
     (trackedWallets ?? []).map((w) => [w.wallet_address as string, w.smart_score as number])

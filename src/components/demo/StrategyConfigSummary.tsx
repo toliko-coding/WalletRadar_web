@@ -22,8 +22,8 @@ export function StrategyConfigSummary({ strategy }: { strategy: DemoStrategy }) 
         <Field label="Signal Window" value={`${strategy.signalWindowMinutes} min`} />
         <Field label="Position Size" value={`$${strategy.virtualBuySizeUsd.toLocaleString()}`} />
         <Field label="Max Positions" value={`${strategy.maxOpenPositions} (max ${strategy.maxAllocationPctPerToken}%/token)`} />
-        <Field label="Stop Loss" value={strategy.stopLossPct !== null ? `-${strategy.stopLossPct}%` : "None"} />
-        <Field label="Take Profit" value={strategy.takeProfitPct !== null ? `+${strategy.takeProfitPct}%` : "None"} />
+        <Field label="Stop Loss" value={strategy.stopLossPct !== null ? `${strategy.stopLossPct === 0 ? "" : "-"}${strategy.stopLossPct}%` : "None"} />
+        <Field label="Take Profit" value={strategy.takeProfitPct !== null ? `${strategy.takeProfitPct === 0 ? "" : "+"}${strategy.takeProfitPct}%` : "None"} />
         <Field label="Max Hold Period" value={strategy.maxPositionAgeHours !== null ? `${strategy.maxPositionAgeHours}h` : "None"} />
         <Field label="Slippage / Fee" value={`${strategy.simulatedSlippagePct}% / ${strategy.feePct}%`} />
       </div>

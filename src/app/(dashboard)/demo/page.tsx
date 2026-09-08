@@ -6,6 +6,7 @@ import { DemoActions } from "@/components/demo/DemoActions";
 import { DemoOverview } from "@/components/demo/DemoOverview";
 import { EquityCurveChart } from "@/components/demo/EquityCurveChart";
 import { DemoPositionsTable } from "@/components/demo/DemoPositionsTable";
+import { DemoClosedPositionsTable } from "@/components/demo/DemoClosedPositionsTable";
 import { DemoTradesFeed } from "@/components/demo/DemoTradesFeed";
 import { StrategyComparisonTable } from "@/components/demo/StrategyComparisonTable";
 import { StrategyConfigSummary } from "@/components/demo/StrategyConfigSummary";
@@ -143,6 +144,13 @@ export default async function DemoPage({
           Open Positions <span className="font-normal text-muted">({openPositions.length}/{strategy.maxOpenPositions})</span>
         </div>
         <DemoPositionsTable positions={openPositions} />
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-medium text-foreground">
+          Closed Positions <span className="font-normal text-muted">({closedPositions.length})</span>
+        </div>
+        <DemoClosedPositionsTable positions={closedPositions} />
       </div>
 
       <div>

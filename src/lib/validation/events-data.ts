@@ -16,6 +16,57 @@ export interface ResolvedEvent {
   signalTime: string;
 }
 
+export interface EventSummary {
+  id: string;
+  tokenMint: string;
+  tokenSymbol: string | null;
+  signalTime: string;
+  /** WalletRadar's own "when did we first see this" timestamp — the forward-only anchor signal-quality horizon returns are resolved against, never `signalTime` (a wallet's historical trade time). */
+  firstRecordedAt: string;
+  walletCount: number;
+  minSmartScore: number | null;
+  maxSmartScore: number | null;
+  avgSmartScore: number | null;
+  marketPriceAtFirstDetection: number | null;
+}
+
+export interface ListEventsCriteria {
+  minWallets?: number;
+  minAvgSmartScore?: number;
+  limit?: number;
+}
+
+/** Read-only, for the Validation dashboard's ad-hoc signal filter (plan §K) — no provider calls. */
+export async function listEvents(criteria: ListEventsCriteria = {}): Promise<EventSummary[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  let query = supabase
+    .from("convergence_events")
+    .select(
+      "id, token_mint, token_symbol, signal_time, first_recorded_at, wallet_count, min_smart_score, max_smart_score, avg_smart_score, market_price_at_first_detection"
+    )
+    .order("first_recorded_at", { ascending: false })
+    .limit(criteria.limit ?? 500);
+
+  if (criteria.minWallets !== undefined) query = query.gte("wallet_count", criteria.minWallets);
+  if (criteria.minAvgSmartScore !== undefined) query = query.gte("avg_smart_score", criteria.minAvgSmartScore);
+
+  const { data } = await query;
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    tokenMint: r.token_mint as string,
+    tokenSymbol: r.token_symbol as string | null,
+    signalTime: r.signal_time as string,
+    firstRecordedAt: r.first_recorded_at as string,
+    walletCount: r.wallet_count as number,
+    minSmartScore: r.min_smart_score as number | null,
+    maxSmartScore: r.max_smart_score as number | null,
+    avgSmartScore: r.avg_smart_score as number | null,
+    marketPriceAtFirstDetection: r.market_price_at_first_detection as number | null,
+  }));
+}
+
 /**
  * Resolves the canonical `convergence_events` row for a freshly detected
  * signal — merging into an existing event within tolerance (plan §B), or

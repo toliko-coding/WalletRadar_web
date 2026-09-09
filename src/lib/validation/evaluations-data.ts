@@ -59,3 +59,31 @@ export async function recordEvaluation(input: RecordEvaluationInput): Promise<vo
   );
   assertNoError(result, "recording demo signal evaluation");
 }
+
+export interface EvaluationSummary {
+  id: string;
+  strategyId: string;
+  eventId: string;
+  decision: SignalDecision;
+  evaluatedAt: string;
+}
+
+/** Read-only, for the Validation dashboard's strategy-quality panel (plan §G/§K) — no provider calls. */
+export async function listEvaluations(limit = 2000): Promise<EvaluationSummary[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const { data } = await supabase
+    .from("demo_signal_evaluations")
+    .select("id, strategy_id, event_id, decision, evaluated_at")
+    .order("evaluated_at", { ascending: false })
+    .limit(limit);
+
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    strategyId: r.strategy_id as string,
+    eventId: r.event_id as string,
+    decision: r.decision as SignalDecision,
+    evaluatedAt: r.evaluated_at as string,
+  }));
+}

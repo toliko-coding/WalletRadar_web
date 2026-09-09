@@ -524,11 +524,19 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     // threading a symbol through every getPrice call site for this one use.
     const candidates = await findMintsNeedingBackfill(now.toISOString(), OBSERVATION_BACKFILL_MINT_CAP);
     for (const { tokenMint } of candidates) {
+      // getPrice's early-return on a same-tick cache hit skips its own
+      // recordObservation call entirely (nothing new to log — the
+      // observation from whichever earlier call populated the cache
+      // already exists), so a cache hit here contributes neither a new
+      // Birdeye call nor a new observation row. Both counters must reflect
+      // that, not just "did a price resolve."
       const alreadyFetchedThisTick = priceCache.has(tokenMint);
       const callsBefore = priceCallsMade;
-      const price = await getPrice(tokenMint); // also opportunistically records the observation itself, see getPrice above
-      if (!alreadyFetchedThisTick) outcomePriceCallsMade += priceCallsMade - callsBefore;
-      if (price !== null) outcomeObservationsRecorded += 1;
+      const price = await getPrice(tokenMint);
+      if (!alreadyFetchedThisTick) {
+        outcomePriceCallsMade += priceCallsMade - callsBefore;
+        if (price !== null) outcomeObservationsRecorded += 1;
+      }
     }
   } catch (err) {
     errors.push(`observation backfill: ${err instanceof Error ? err.message : String(err)}`);

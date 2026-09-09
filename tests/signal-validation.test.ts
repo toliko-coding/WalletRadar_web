@@ -99,24 +99,45 @@ describe("resolveHorizonOutcome — early-approximation fallback and anti-optimi
   });
 });
 
-describe("resolveHorizonReturn — baseline + forward horizon composition", () => {
-  it("computes a positive return when both baseline and forward observations resolve on-time", () => {
-    const observations = [obs(1, 100), obs(65, 150)];
-    const result = resolveHorizonReturn(observations, horizon("1h"));
+describe("resolveHorizonReturn — known-baseline + forward horizon composition", () => {
+  it("computes a positive return using an explicit known baseline price", () => {
+    const observations = [obs(65, 150)];
+    const result = resolveHorizonReturn(100, observations, horizon("1h"));
     expect(result.status).toBe("RESOLVED_ON_TIME");
     expect(result.returnPct).toBeCloseTo(50);
   });
 
-  it("is UNAVAILABLE when the baseline price was never captured, even if a forward price exists", () => {
+  it("falls back to matching an observation in the baseline window when no known baseline is passed", () => {
+    const observations = [obs(1, 100), obs(65, 150)];
+    const result = resolveHorizonReturn(null, observations, horizon("1h"));
+    expect(result.status).toBe("RESOLVED_ON_TIME");
+    expect(result.returnPct).toBeCloseTo(50);
+  });
+
+  it("regression: a known baseline must not be discarded even though its own observation predates the anchor by a fraction of a second (the founding-observation race)", () => {
+    // The exact real-world bug this fixes: an event's founding price
+    // observation is written moments BEFORE the event row's own
+    // first_recorded_at timestamp (getPrice() runs, then the event is
+    // created), so a plain "closest observation to t=0" search over
+    // observations relative to that anchor would never find it — as if the
+    // observation were negative-elapsed and outside the [0,5] baseline
+    // window. Passing the already-known price sidesteps that entirely.
+    const observations = [obs(13.58, 150)]; // no observation in [0,5] at all
+    const result = resolveHorizonReturn(100, observations, horizon("15m"));
+    expect(result.status).toBe("RESOLVED_EARLY_APPROX");
+    expect(result.returnPct).toBeCloseTo(50);
+  });
+
+  it("is UNAVAILABLE when no baseline is known and none can be matched from observations either", () => {
     const observations = [obs(65, 150)]; // nothing in [0,5] for the baseline
-    const result = resolveHorizonReturn(observations, horizon("1h"));
+    const result = resolveHorizonReturn(null, observations, horizon("1h"));
     expect(result.status).toBe("UNAVAILABLE");
     expect(result.returnPct).toBeNull();
   });
 
-  it("is UNAVAILABLE when the forward horizon has no qualifying observation", () => {
+  it("is UNAVAILABLE when the forward horizon has no qualifying observation, even with a known baseline", () => {
     const observations = [obs(1, 100)];
-    const result = resolveHorizonReturn(observations, horizon("1h"));
+    const result = resolveHorizonReturn(100, observations, horizon("1h"));
     expect(result.status).toBe("UNAVAILABLE");
   });
 });

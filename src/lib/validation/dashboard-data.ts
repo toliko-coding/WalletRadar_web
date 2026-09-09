@@ -57,7 +57,7 @@ export async function getSignalQualityData(criteria: ListEventsCriteria = {}): P
     const rows = await observationsFor(event.tokenMint, event.firstRecordedAt);
     const relative = toRelativeObservations(rows, event.firstRecordedAt);
     for (const horizon of HORIZON_DEFINITIONS) {
-      perHorizon.get(horizon.key)!.push(resolveHorizonReturn(relative, horizon));
+      perHorizon.get(horizon.key)!.push(resolveHorizonReturn(event.marketPriceAtFirstDetection, relative, horizon));
     }
   }
 

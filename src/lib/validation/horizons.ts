@@ -114,25 +114,40 @@ export interface ResolvedReturn {
 }
 
 /**
- * Resolves both the t=0 baseline price and the forward horizon price from
- * the same observation list, using the identical resolution rule for both.
- * The baseline itself can be UNAVAILABLE (no price was ever captured near
- * evaluation time) — in that case the return is UNAVAILABLE too, never
- * assumed. The returned `status` mirrors the *forward* horizon's status
+ * Resolves a horizon's return given an explicit, already-known baseline
+ * price (e.g. an event's `market_price_at_first_detection`, or a trade's
+ * own entry price) plus an observation list for the forward side.
+ *
+ * A known baseline is preferred over re-deriving "the price at t=0" by
+ * searching observations near the anchor: the founding observation for a
+ * freshly-created event is written by a price-fetch call that necessarily
+ * completes *before* the event row's own timestamp is set (the write order
+ * is: fetch price -> resolve/create event), so a query for observations
+ * `>= anchor` can systematically miss it by a fraction of a second. Passing
+ * the price that's already stored avoids that race entirely. When no known
+ * baseline is available (`knownBaselinePriceUsd` is null — e.g. an event
+ * whose first-ever detection had no price in hand), falls back to matching
+ * BASELINE_HORIZON against the observation list, same as any other horizon.
+ *
+ * The returned `status` mirrors the *forward* horizon's status
  * (RESOLVED_ON_TIME / RESOLVED_EARLY_APPROX) — an early-approx baseline
  * paired with an on-time forward observation is treated as on-time, since
  * the baseline horizon's own tolerance window ([0,5]) makes "early vs. late"
  * largely moot for a t=0 anchor.
  */
-export function resolveHorizonReturn(observations: PriceObservation[], horizon: HorizonDefinition): ResolvedReturn {
-  const baseline = resolveHorizonOutcome(observations, BASELINE_HORIZON);
+export function resolveHorizonReturn(
+  knownBaselinePriceUsd: number | null,
+  observations: PriceObservation[],
+  horizon: HorizonDefinition
+): ResolvedReturn {
+  const baselinePriceUsd =
+    knownBaselinePriceUsd ?? resolveHorizonOutcome(observations, BASELINE_HORIZON).observation?.priceUsd ?? null;
   const outcome = resolveHorizonOutcome(observations, horizon);
 
-  if (baseline.status === "UNAVAILABLE" || outcome.status === "UNAVAILABLE") {
+  if (baselinePriceUsd === null || outcome.status === "UNAVAILABLE") {
     return { status: "UNAVAILABLE", returnPct: null, baselinePriceUsd: null, outcomePriceUsd: null, actualMinutesElapsed: null };
   }
 
-  const baselinePriceUsd = baseline.observation!.priceUsd;
   const outcomePriceUsd = outcome.observation!.priceUsd;
   const returnPct = baselinePriceUsd > 0 ? ((outcomePriceUsd - baselinePriceUsd) / baselinePriceUsd) * 100 : null;
 

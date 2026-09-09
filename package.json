@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "automation:start": "tsx automation/cli.ts start",
+    "automation:stop": "tsx automation/cli.ts stop",
+    "automation:status": "tsx automation/cli.ts status"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -28,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "vitest": "^3.2.7"
   }

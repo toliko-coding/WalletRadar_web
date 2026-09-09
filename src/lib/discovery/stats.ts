@@ -55,6 +55,31 @@ export async function getDiscoveryStats(): Promise<DiscoveryStats> {
   };
 }
 
+/**
+ * The last completed run of a specific job, regardless of how many other
+ * job types have run more recently. Deliberately NOT derived from
+ * getRecentJobRuns()'s generic top-N-across-all-job-types list — at a
+ * 15-minute tick cadence, ticks alone would push a 6-hourly discovery/
+ * analyze run out of even a fairly generous top-N window within a few
+ * hours, making a due-state check built on that list wrongly conclude
+ * "never run." Used by the automation runner's isJobDue() checks
+ * (src/lib/automation/scheduling.ts), one call per job type.
+ */
+export async function getLastJobRunAt(jobName: string): Promise<string | null> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return null;
+
+  const { data } = await supabase
+    .from("job_runs")
+    .select("completed_at")
+    .eq("job_name", jobName)
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  return (data?.completed_at as string | undefined) ?? null;
+}
+
 export interface JobRunRecord {
   jobName: string;
   startedAt: string;

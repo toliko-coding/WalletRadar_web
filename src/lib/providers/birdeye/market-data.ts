@@ -18,17 +18,21 @@ interface TokenOverviewResponse {
 
 export const birdeyeMarketData: MarketDataProvider = {
   async getTokenPrice(tokenMint) {
-    const data = await cached(`birdeye:price:${tokenMint}`, 30, () =>
-      birdeyeRequest<PriceResponse>("/defi/price", { query: { address: tokenMint } })
+    const data = await cached(
+      `birdeye:price:${tokenMint}`,
+      30,
+      () => birdeyeRequest<PriceResponse>("/defi/price", { query: { address: tokenMint } }),
+      "birdeye"
     );
     return { priceUsd: data?.value ?? null };
   },
 
   async getTokenLiquidity(tokenMint) {
-    const data = await cached(`birdeye:overview:${tokenMint}`, 300, () =>
-      birdeyeRequest<TokenOverviewResponse>("/defi/token_overview", {
-        query: { address: tokenMint },
-      })
+    const data = await cached(
+      `birdeye:overview:${tokenMint}`,
+      300,
+      () => birdeyeRequest<TokenOverviewResponse>("/defi/token_overview", { query: { address: tokenMint } }),
+      "birdeye"
     );
     return { liquidityUsd: data?.liquidity ?? null, marketCapUsd: data?.marketCap ?? null };
   },
@@ -36,10 +40,11 @@ export const birdeyeMarketData: MarketDataProvider = {
 
 export const birdeyeTokenMetadata: TokenMetadataProvider = {
   async getTokenMetadata(tokenMint) {
-    const data = await cached(`birdeye:overview:${tokenMint}`, 300, () =>
-      birdeyeRequest<TokenOverviewResponse>("/defi/token_overview", {
-        query: { address: tokenMint },
-      })
+    const data = await cached(
+      `birdeye:overview:${tokenMint}`,
+      300,
+      () => birdeyeRequest<TokenOverviewResponse>("/defi/token_overview", { query: { address: tokenMint } }),
+      "birdeye"
     );
     return {
       symbol: data?.symbol ?? null,

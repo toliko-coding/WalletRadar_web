@@ -132,10 +132,11 @@ export async function getWalletPnlSummary(
   windowLabel: string
 ): Promise<PnlSummaryResponse> {
   const duration = DURATION_BY_WINDOW[windowLabel] ?? "all";
-  return cached(`birdeye:pnl-summary:${walletAddress}:${duration}`, 300, () =>
-    birdeyeRequest<PnlSummaryResponse>("/wallet/v2/pnl/summary", {
-      query: { wallet: walletAddress, duration },
-    })
+  return cached(
+    `birdeye:pnl-summary:${walletAddress}:${duration}`,
+    300,
+    () => birdeyeRequest<PnlSummaryResponse>("/wallet/v2/pnl/summary", { query: { wallet: walletAddress, duration } }),
+    "birdeye"
   );
 }
 
@@ -144,19 +145,24 @@ export async function getWalletPnlDetails(
   windowLabel: string
 ): Promise<PnlDetailsResponse> {
   const duration = DURATION_BY_WINDOW[windowLabel] ?? "all";
-  return cached(`birdeye:pnl-details:${walletAddress}:${duration}`, 300, () =>
-    birdeyeRequest<PnlDetailsResponse>("/wallet/v2/pnl/details", {
-      method: "POST",
-      body: { wallet: walletAddress, duration, limit: 100, sort_by: "last_trade" },
-    })
+  return cached(
+    `birdeye:pnl-details:${walletAddress}:${duration}`,
+    300,
+    () =>
+      birdeyeRequest<PnlDetailsResponse>("/wallet/v2/pnl/details", {
+        method: "POST",
+        body: { wallet: walletAddress, duration, limit: 100, sort_by: "last_trade" },
+      }),
+    "birdeye"
   );
 }
 
 export async function getWalletPnlChart(walletAddress: string): Promise<PnlChartPoint[]> {
-  const res = await cached(`birdeye:pnl-chart:${walletAddress}`, 300, () =>
-    birdeyeRequest<PnlChartResponse>("/wallet/v2/pnl/chart", {
-      query: { wallet: walletAddress, position_scope: "cumulative" },
-    })
+  const res = await cached(
+    `birdeye:pnl-chart:${walletAddress}`,
+    300,
+    () => birdeyeRequest<PnlChartResponse>("/wallet/v2/pnl/chart", { query: { wallet: walletAddress, position_scope: "cumulative" } }),
+    "birdeye"
   );
   return res.data ?? [];
 }
@@ -253,7 +259,8 @@ export const birdeyeWalletAnalytics: WalletAnalyticsProvider = {
             sort_type: "desc",
             limit: opts?.limit ?? 10,
           },
-        })
+        }),
+      "birdeye"
     );
     return res.items.map((item) => ({
       walletAddress: item.owner,
@@ -265,10 +272,11 @@ export const birdeyeWalletAnalytics: WalletAnalyticsProvider = {
   },
 
   async getTrendingTokens(limit = 10) {
-    const res = await cached(`birdeye:trending:${limit}`, 300, () =>
-      birdeyeRequest<TrendingTokensResponse>("/defi/token_trending", {
-        query: { sort_by: "volumeUSD", sort_type: "desc", limit },
-      })
+    const res = await cached(
+      `birdeye:trending:${limit}`,
+      300,
+      () => birdeyeRequest<TrendingTokensResponse>("/defi/token_trending", { query: { sort_by: "volumeUSD", sort_type: "desc", limit } }),
+      "birdeye"
     );
     return res.tokens.map((t) => ({
       tokenMint: t.address,

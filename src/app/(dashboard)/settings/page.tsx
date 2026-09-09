@@ -1,7 +1,9 @@
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProviderUsagePanel } from "@/components/settings/ProviderUsagePanel";
+import { AutomationPanel } from "@/components/settings/AutomationPanel";
 import { isBirdeyeConfigured, isHeliusConfigured, isSupabaseConfigured } from "@/lib/env";
 import { getTodayProviderUsage } from "@/lib/telemetry/provider-usage-data";
+import { getAutomationStatus } from "@/lib/automation/status-data";
 
 // Provider usage counters change on every Birdeye/Helius call — must stay
 // dynamic or a prerendered build would show stale/zero counts forever.
@@ -27,7 +29,7 @@ function Row({ label, connected, hint }: { label: string; connected: boolean; hi
 }
 
 export default async function SettingsPage() {
-  const usage = await getTodayProviderUsage();
+  const [usage, automationStatus] = await Promise.all([getTodayProviderUsage(), getAutomationStatus()]);
 
   return (
     <div className="space-y-6">
@@ -54,6 +56,8 @@ export default async function SettingsPage() {
       </div>
 
       <ProviderUsagePanel usage={usage} />
+
+      <AutomationPanel status={automationStatus} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   computeHeadlineStats,
   classifySampleConfidence,
   hasReturnOutlier,
+  toRelativeObservations,
   HORIZON_DEFINITIONS,
   type PriceObservation,
   type ResolvedReturn,
@@ -197,6 +198,20 @@ describe("hasReturnOutlier", () => {
 
   it("never flags fewer than 2 returns", () => {
     expect(hasReturnOutlier([500], 500, 5)).toBe(false);
+  });
+});
+
+describe("toRelativeObservations", () => {
+  it("converts absolute timestamps into minutes-since-anchor", () => {
+    const rows = [
+      { priceUsd: 1, observedAt: "2026-09-08T14:06:00Z" },
+      { priceUsd: 2, observedAt: "2026-09-08T15:03:00Z" },
+    ];
+    const result = toRelativeObservations(rows, "2026-09-08T14:00:00Z");
+    expect(result).toEqual([
+      { minutesSinceEvaluation: 6, priceUsd: 1 },
+      { minutesSinceEvaluation: 63, priceUsd: 2 },
+    ]);
   });
 });
 

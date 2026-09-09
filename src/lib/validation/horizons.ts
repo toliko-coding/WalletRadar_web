@@ -54,6 +54,22 @@ export interface PriceObservation {
   priceUsd: number;
 }
 
+/**
+ * Converts raw stored observations (absolute timestamps) into the
+ * evaluation-relative shape `resolveHorizonOutcome` operates on. Kept pure
+ * (no I/O) so it's testable independent of how the rows were fetched.
+ */
+export function toRelativeObservations(
+  rows: Array<{ priceUsd: number; observedAt: string }>,
+  anchorIso: string
+): PriceObservation[] {
+  const anchorMs = new Date(anchorIso).getTime();
+  return rows.map((r) => ({
+    minutesSinceEvaluation: (new Date(r.observedAt).getTime() - anchorMs) / 60_000,
+    priceUsd: r.priceUsd,
+  }));
+}
+
 export type HorizonOutcomeStatus = "RESOLVED_ON_TIME" | "RESOLVED_EARLY_APPROX" | "UNAVAILABLE";
 
 export interface HorizonOutcome {

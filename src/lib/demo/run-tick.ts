@@ -20,6 +20,8 @@ import {
 import { getStrategy, getAccount, getOpenPositions, getClosedPositions } from "./strategies";
 import { resolveOrCreateEvent, type ResolvedEvent } from "@/lib/validation/events-data";
 import { recordEvaluation, type SignalDecision } from "@/lib/validation/evaluations-data";
+import { recordObservation } from "@/lib/validation/observations-data";
+import { findMintsNeedingBackfill } from "@/lib/validation/backfill";
 
 export interface SkippedSignal {
   tokenMint: string;
@@ -34,8 +36,16 @@ export interface DemoTickResult {
   positionsClosed: number;
   priceCallsMade: number;
   skippedSignals: SkippedSignal[];
+  /** How many token_market_data rows the bounded observation-backfill step wrote this tick (plan §D) — separate from the opportunistic logging every normal getPrice/getRiskData call also does. */
+  outcomeObservationsRecorded: number;
+  /** Genuine new Birdeye calls attributable specifically to the backfill step — 0 whenever every candidate mint was already covered by a call this tick made for another reason, or by the underlying 30s cache. */
+  outcomePriceCallsMade: number;
   errors: string[];
 }
+
+// Bounds the one deliberate new source of Birdeye calls this feature
+// introduces (plan §D/§I) — always small, always visible in the result.
+const OBSERVATION_BACKFILL_MINT_CAP = 8;
 
 /**
  * One manually-triggered pass of entries -> exits -> snapshot for a single
@@ -43,7 +53,8 @@ export interface DemoTickResult {
  * CRON.md and the Phase 1G note in run-tick's callers). Prices are fetched
  * at most once per token per tick (cached in `priceCache`) specifically to
  * keep this cheap: with the current tiny/sparse dataset this typically
- * makes 0-2 live Birdeye calls total (usually just the SOL benchmark).
+ * makes 0-2 live Birdeye calls total (usually just the SOL benchmark), plus
+ * up to OBSERVATION_BACKFILL_MINT_CAP more for the bounded backfill step.
  */
 export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
   const supabase = getSupabaseServiceClient();
@@ -57,6 +68,17 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
       const { priceUsd } = await birdeyeMarketData.getTokenPrice(mint);
       priceCallsMade += 1;
       priceCache.set(mint, priceUsd);
+      // Opportunistic, zero-marginal-cost market observation (plan §D) —
+      // logs the price this call already paid for, regardless of whether
+      // any signal/event cares about this mint. Never blocks the trading
+      // decision this price is actually being fetched for.
+      if (priceUsd !== null) {
+        try {
+          await recordObservation({ tokenMint: mint, priceUsd, fetchedAt: new Date().toISOString() });
+        } catch (err) {
+          errors.push(`recording market observation for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       return priceUsd;
     } catch (err) {
       errors.push(`price lookup for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
@@ -74,6 +96,18 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
       priceCallsMade += 1;
       const data = { liquidityUsd, marketCapUsd };
       riskDataCache.set(mint, data);
+      // Liquidity/market-cap-only observation — price_usd left null, so
+      // this row is never picked up by horizon-return resolution (which
+      // reads price_usd only), but it's available for a future "liquidity
+      // near detection" display. Opportunistic, same zero-marginal-cost
+      // reasoning as getPrice above.
+      if (liquidityUsd !== null || marketCapUsd !== null) {
+        try {
+          await recordObservation({ tokenMint: mint, priceUsd: null, liquidityUsd, marketCapUsd, fetchedAt: new Date().toISOString() });
+        } catch (err) {
+          errors.push(`recording liquidity observation for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       return data;
     } catch (err) {
       errors.push(`liquidity/market cap lookup for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
@@ -84,20 +118,20 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
   }
 
   if (!supabase) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: ["Supabase is not configured"] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], outcomeObservationsRecorded: 0, outcomePriceCallsMade: 0, errors: ["Supabase is not configured"] };
   }
 
   const strategy = await getStrategy(strategyId);
   if (!strategy) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: [`Strategy ${strategyId} not found`] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], outcomeObservationsRecorded: 0, outcomePriceCallsMade: 0, errors: [`Strategy ${strategyId} not found`] };
   }
   if (strategy.status !== "ACTIVE") {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: ["Strategy is paused"] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], outcomeObservationsRecorded: 0, outcomePriceCallsMade: 0, errors: ["Strategy is paused"] };
   }
 
   let account = await getAccount(strategyId);
   if (!account) {
-    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], errors: [`No demo_accounts row for strategy ${strategyId}`] };
+    return { strategyId, signalsConsidered: 0, positionsOpened: 0, positionsClosed: 0, priceCallsMade: 0, skippedSignals: [], outcomeObservationsRecorded: 0, outcomePriceCallsMade: 0, errors: [`No demo_accounts row for strategy ${strategyId}`] };
   }
 
   let openPositions = await getOpenPositions(strategyId);
@@ -471,6 +505,35 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     errors.push(`snapshot: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // --- Bounded market-observation backfill (§D/§I) — the one deliberate new
+  // source of Birdeye calls this whole feature introduces. Global across
+  // every strategy's evaluations (token_market_data is a shared ledger, so
+  // one fetch here can resolve gaps for every strategy that's ever
+  // evaluated an event on that token), strictly capped, and its cost is
+  // always reported below rather than hidden inside the general
+  // priceCallsMade total.
+  let outcomeObservationsRecorded = 0;
+  let outcomePriceCallsMade = 0;
+  try {
+    // findMintsNeedingBackfill also returns each mint's token_symbol, but
+    // getPrice's shared closure has no per-call symbol parameter (it's used
+    // from many call sites that don't have one in hand) — the tokens row it
+    // writes via recordObservation is symbol: null in that case. Harmless:
+    // tokens.symbol is cosmetic bookkeeping only, never read by horizon
+    // resolution, so this is left as a known simplification rather than
+    // threading a symbol through every getPrice call site for this one use.
+    const candidates = await findMintsNeedingBackfill(now.toISOString(), OBSERVATION_BACKFILL_MINT_CAP);
+    for (const { tokenMint } of candidates) {
+      const alreadyFetchedThisTick = priceCache.has(tokenMint);
+      const callsBefore = priceCallsMade;
+      const price = await getPrice(tokenMint); // also opportunistically records the observation itself, see getPrice above
+      if (!alreadyFetchedThisTick) outcomePriceCallsMade += priceCallsMade - callsBefore;
+      if (price !== null) outcomeObservationsRecorded += 1;
+    }
+  } catch (err) {
+    errors.push(`observation backfill: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return {
     strategyId,
     signalsConsidered: signals.length,
@@ -478,6 +541,8 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     positionsClosed,
     priceCallsMade,
     skippedSignals,
+    outcomeObservationsRecorded,
+    outcomePriceCallsMade,
     errors,
   };
 }

@@ -145,6 +145,25 @@ export function resolveHorizonReturn(observations: PriceObservation[], horizon: 
   };
 }
 
+/**
+ * Whether a given evaluation could still benefit from more observations —
+ * true when at least one horizon's acceptable window hasn't fully closed
+ * yet (elapsed time hasn't passed its max bound) AND that horizon doesn't
+ * already have an on-time resolution. Once a horizon's window has closed,
+ * no future observation can change its outcome (whether that outcome ended
+ * up RESOLVED_EARLY_APPROX or UNAVAILABLE), so it's excluded from this
+ * check regardless of status. Used to bound the opportunistic
+ * observation-backfill step (plan §D) to mints that can still be helped.
+ */
+export function needsMoreObservations(evaluatedAtIso: string, observations: PriceObservation[], nowIso: string): boolean {
+  const elapsedMinutes = (new Date(nowIso).getTime() - new Date(evaluatedAtIso).getTime()) / 60_000;
+  return HORIZON_DEFINITIONS.some((horizon) => {
+    const windowStillOpen = elapsedMinutes <= horizon.maxAcceptableMinutes;
+    if (!windowStillOpen) return false;
+    return resolveHorizonOutcome(observations, horizon).status !== "RESOLVED_ON_TIME";
+  });
+}
+
 export interface HorizonCoverage {
   onTimeCount: number;
   earlyOnlyCount: number;

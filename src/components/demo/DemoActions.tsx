@@ -23,7 +23,7 @@ export function DemoActions({ strategy }: { strategy: DemoStrategy }) {
           ? ` — skipped: ${skipped.map((s) => `${s.tokenSymbol ?? s.tokenMint.slice(0, 4)} (${s.reason})`).join(", ")}`
           : "";
         setMessage(
-          `Signals considered: ${json.signalsConsidered}, opened: ${json.positionsOpened}, closed: ${json.positionsClosed}, price calls: ${json.priceCallsMade}${skippedSummary}${json.errors?.length ? `, errors: ${json.errors.join("; ")}` : ""}`
+          `Signals considered: ${json.signalsConsidered}, opened: ${json.positionsOpened}, closed: ${json.positionsClosed}, price calls: ${json.priceCallsMade} (${json.outcomePriceCallsMade ?? 0} for outcome backfill), observations recorded: ${json.outcomeObservationsRecorded ?? 0}${skippedSummary}${json.errors?.length ? `, errors: ${json.errors.join("; ")}` : ""}`
         );
       }
       if (action === "delete") {

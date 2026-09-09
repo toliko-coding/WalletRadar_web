@@ -5,7 +5,8 @@ import { assertNoError } from "@/lib/supabase/assert";
 export interface RecordObservationInput {
   tokenMint: string;
   tokenSymbol?: string | null;
-  priceUsd: number;
+  /** Null for a liquidity/market-cap-only observation (e.g. from getRiskData, which doesn't fetch price) — such rows are never picked up by horizon-return resolution, which reads price_usd only. */
+  priceUsd: number | null;
   liquidityUsd?: number | null;
   marketCapUsd?: number | null;
   volumeUsd?: number | null;
@@ -52,10 +53,12 @@ export interface StoredObservation {
 }
 
 /**
- * Raw observations for one token since a given time — callers convert to
- * evaluation-relative minutes via `toRelativeObservations`
+ * Raw price-bearing observations for one token since a given time — callers
+ * convert to evaluation-relative minutes via `toRelativeObservations`
  * (src/lib/validation/horizons.ts) against whichever evaluation's
- * `evaluated_at` they're resolving horizons for.
+ * `evaluated_at` they're resolving horizons for. Liquidity/market-cap-only
+ * rows (price_usd null, written from getRiskData) are excluded here since
+ * they carry no price for horizon-return resolution to use.
  */
 export async function getObservationsForToken(tokenMint: string, sinceIso: string): Promise<StoredObservation[]> {
   const supabase = getSupabaseServiceClient();
@@ -65,6 +68,7 @@ export async function getObservationsForToken(tokenMint: string, sinceIso: strin
     .from("token_market_data")
     .select("price_usd, fetched_at")
     .eq("token_mint", tokenMint)
+    .not("price_usd", "is", null)
     .gte("fetched_at", sinceIso)
     .order("fetched_at", { ascending: true });
 

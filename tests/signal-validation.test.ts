@@ -7,6 +7,7 @@ import {
   classifySampleConfidence,
   hasReturnOutlier,
   toRelativeObservations,
+  needsMoreObservations,
   HORIZON_DEFINITIONS,
   type PriceObservation,
   type ResolvedReturn,
@@ -198,6 +199,35 @@ describe("hasReturnOutlier", () => {
 
   it("never flags fewer than 2 returns", () => {
     expect(hasReturnOutlier([500], 500, 5)).toBe(false);
+  });
+});
+
+describe("needsMoreObservations — bounds the observation-backfill step", () => {
+  it("is true when every horizon window is still open and nothing is resolved yet", () => {
+    expect(needsMoreObservations("2026-09-08T14:00:00Z", [], "2026-09-08T14:01:00Z")).toBe(true);
+  });
+
+  it("is false once every horizon is either resolved on-time or its window has permanently closed", () => {
+    // All 5 horizons on-time-resolved (each observation is at-or-after its
+    // own target minute) with generous observations.
+    const observations = [obs(6, 1), obs(17, 1), obs(63, 1), obs(251, 1), obs(1440, 1)];
+    expect(needsMoreObservations("2026-09-08T14:00:00Z", observations, "2026-09-09T20:00:00Z")).toBe(false);
+  });
+
+  it("is false once every horizon's window has closed, even if some only ever resolved RESOLVED_EARLY_APPROX or UNAVAILABLE", () => {
+    // 1h horizon only has a +50m (early) observation; every other horizon
+    // has nothing. Far enough past 24h's own window that nothing could
+    // possibly still help any of them.
+    const observations = [obs(50, 1)];
+    const muchLater = new Date(new Date("2026-09-08T14:00:00Z").getTime() + 1900 * 60_000).toISOString();
+    expect(needsMoreObservations("2026-09-08T14:00:00Z", observations, muchLater)).toBe(false);
+  });
+
+  it("is true when a still-open horizon window has not yet resolved on-time", () => {
+    // Only 30 minutes elapsed — the 5m/15m windows have already closed
+    // (unresolved, permanently), but 1h/4h/24h windows are still open and
+    // nothing has resolved them yet.
+    expect(needsMoreObservations("2026-09-08T14:00:00Z", [], "2026-09-08T14:30:00Z")).toBe(true);
   });
 });
 

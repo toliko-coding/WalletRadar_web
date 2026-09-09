@@ -19,7 +19,7 @@ import {
 } from "./engine";
 import { getStrategy, getAccount, getOpenPositions, getClosedPositions } from "./strategies";
 import { resolveOrCreateEvent, type ResolvedEvent } from "@/lib/validation/events-data";
-import { recordEvaluation, type SignalDecision } from "@/lib/validation/evaluations-data";
+import { recordEvaluation, hasEvaluation, type SignalDecision } from "@/lib/validation/evaluations-data";
 import { recordObservation } from "@/lib/validation/observations-data";
 import { findMintsNeedingBackfill } from "@/lib/validation/backfill";
 
@@ -247,26 +247,23 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     skippedSignals.push({ tokenMint: signal.tokenMint, tokenSymbol: signal.tokenSymbol, reason });
   }
 
-  // Durable counterpart to skip() — resolves/merges the canonical
-  // convergence_events row for this signal and records this strategy's
-  // decision about it (demo_signal_evaluations), at most once per
-  // (strategy, event) pair ever. Entirely Supabase reads/writes, zero
-  // provider calls, and deliberately best-effort: a failure here must never
-  // abort or skip an actual trade — it's caught and reported in `errors`,
-  // never rethrown into the entries loop's own control flow.
-  async function recordDecision(
+  // Records this strategy's decision about an already-resolved event
+  // (demo_signal_evaluations), at most once per (strategy, event) pair
+  // ever. Entirely Supabase reads/writes, zero provider calls, and
+  // deliberately best-effort: a failure here must never abort or skip an
+  // actual trade — it's caught and reported in `errors`, never rethrown
+  // into the entries loop's own control flow. Takes an already-resolved
+  // `event` rather than resolving one itself — event resolution now
+  // happens exactly once per signal, at the top of the loop (see below),
+  // specifically so the new already-evaluated gate can check it before any
+  // skip/trade decision is made.
+  async function recordDecisionForEvent(
+    event: ResolvedEvent,
     signal: (typeof signals)[number],
     decision: SignalDecision,
-    marketPriceAtDetection: number | null,
     demoSignalId: string | null
-  ): Promise<ResolvedEvent | null> {
+  ): Promise<void> {
     try {
-      const event = await resolveOrCreateEvent(
-        { tokenMint: signal.tokenMint, signalTime: signal.firstBuyAt, wallets: signal.wallets },
-        signal.tokenSymbol,
-        marketPriceAtDetection
-      );
-      if (!event) return null; // Supabase not configured
       await recordEvaluation({
         strategyId,
         eventId: event.id,
@@ -276,10 +273,8 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
         evaluatedAt: now.toISOString(), // this tick's "now" — the forward-only anchor horizon matching resolves against
         demoSignalId,
       });
-      return event;
     } catch (err) {
       errors.push(`recording signal evaluation for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
     }
   }
 
@@ -289,33 +284,82 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     // continuous monitoring loop (Phase 1G): a strategy created after this
     // tick would run could never have produced this position.
     const detectionTime = now.toISOString();
+
+    // Resolve the canonical event ONCE per signal, before any skip/trade
+    // decision — every branch below reuses this same resolution. No price
+    // is known yet at this point (fetching one here for every signal,
+    // including ones about to be skipped for portfolio reasons, would cost
+    // a new Birdeye call per signal per tick — exactly what this bookkeeping
+    // layer must never do); the TRADED branch backfills the price onto this
+    // same event once it actually fetches one.
+    let event: ResolvedEvent | null = null;
+    try {
+      event = await resolveOrCreateEvent(
+        { tokenMint: signal.tokenMint, signalTime: signal.firstBuyAt, wallets: signal.wallets },
+        signal.tokenSymbol,
+        null
+      );
+    } catch (err) {
+      errors.push(`resolving convergence event for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Duplicate-trade fix (Automatic Evidence Collection plan): once a
+    // strategy has made ANY durable decision about this exact event —
+    // TRADED or any SKIPPED_* reason, it doesn't matter which — that
+    // decision is final. Without this gate, a position that later closed
+    // (stop-loss/take-profit/max-hold) could be reopened on a later tick if
+    // the same underlying convergence signal was still inside the lookback
+    // window, since `openTokens` below only reflects *currently* open
+    // positions. Keyed by event.id, never by raw token mint, so a
+    // genuinely new future event on the same token remains fully tradable.
+    if (event) {
+      let alreadyDecided: boolean;
+      try {
+        alreadyDecided = await hasEvaluation(strategyId, event.id);
+      } catch (err) {
+        // Fail CLOSED here, deliberately, unlike every other bookkeeping
+        // failure in this loop: this specific check exists to prevent a
+        // duplicate trade, so proceeding on an unconfirmed read would risk
+        // exactly the bug it exists to close. The cost of skipping is
+        // trivial (this signal is simply reconsidered on the next tick);
+        // the cost of proceeding wrongly is a real duplicate position.
+        errors.push(`checking prior evaluation for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
+        skip(signal, "could not verify prior evaluation — skipping this tick to avoid a possible duplicate trade");
+        continue;
+      }
+      if (alreadyDecided) {
+        skip(signal, "strategy already made a durable decision for this event");
+        continue;
+      }
+    }
+
     if (!isSignalEligible(detectionTime, strategy.createdAt)) {
       skip(signal, "signal predates this strategy's creation (no backdating)");
       // Recorded purely as a strategy-behavior audit trail (proof the
       // strategy correctly refused to backdate itself) — SKIPPED_PREDATES_
       // STRATEGY is excluded from every signal-/strategy-quality statistic
       // by definition (src/lib/validation/evaluations-data.ts).
-      await recordDecision(signal, "SKIPPED_PREDATES_STRATEGY", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_PREDATES_STRATEGY", null);
       continue;
     }
     if (openTokens.has(signal.tokenMint)) {
       skip(signal, "already holding an open position in this token");
-      await recordDecision(signal, "SKIPPED_ALREADY_HOLDING", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_ALREADY_HOLDING", null);
       continue;
     }
     if (!canOpenNewPosition(openPositionCount, strategy.maxOpenPositions)) {
       skip(signal, `max open positions reached (${strategy.maxOpenPositions})`);
-      await recordDecision(signal, "SKIPPED_MAX_POSITIONS", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_MAX_POSITIONS", null);
       continue;
     }
     if (exceedsMaxAllocation(0, strategy.virtualBuySizeUsd, approxPortfolioValueUsd, strategy.maxAllocationPctPerToken)) {
       skip(signal, `would exceed max allocation per token (${strategy.maxAllocationPctPerToken}%)`);
-      await recordDecision(signal, "SKIPPED_ALLOCATION", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_ALLOCATION", null);
       continue;
     }
     if (account.cashBalanceUsd < strategy.virtualBuySizeUsd) {
       skip(signal, "insufficient virtual cash");
-      await recordDecision(signal, "SKIPPED_INSUFFICIENT_CASH", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_INSUFFICIENT_CASH", null);
       continue;
     }
 
@@ -334,7 +378,7 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
         })
       ) {
         skip(signal, "failed token risk filters (liquidity/market cap)");
-        await recordDecision(signal, "SKIPPED_RISK_FILTER", null, null);
+        if (event) await recordDecisionForEvent(event, signal, "SKIPPED_RISK_FILTER", null);
         continue;
       }
     }
@@ -342,7 +386,7 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     const currentPrice = await getPrice(signal.tokenMint);
     if (currentPrice === null) {
       skip(signal, "no live price available"); // never fabricate an entry price
-      await recordDecision(signal, "SKIPPED_NO_PRICE", null, null);
+      if (event) await recordDecisionForEvent(event, signal, "SKIPPED_NO_PRICE", null);
       continue;
     }
 
@@ -351,19 +395,24 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
       const quantity = computePositionQuantity(strategy.virtualBuySizeUsd, fill.executionPrice);
       const feesUsd = calculateFeeUsd(strategy.virtualBuySizeUsd, strategy.feePct);
 
-      // Resolved before the demo_signals insert so the trade can carry its
-      // originating event's id (nullable event handled below); guarded in
-      // its own try/catch — a validation-bookkeeping failure must never
-      // block an actual trade.
-      let event: ResolvedEvent | null = null;
-      try {
-        event = await resolveOrCreateEvent(
-          { tokenMint: signal.tokenMint, signalTime: signal.firstBuyAt, wallets: signal.wallets },
-          signal.tokenSymbol,
-          currentPrice
-        );
-      } catch (err) {
-        errors.push(`resolving convergence event for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
+      // Backfill the now-known price onto the already-resolved event —
+      // resolveOrCreateEvent's own merge rule never overwrites a real
+      // captured price with a later null, so this only ever fills in a
+      // price that was missing, using the same matching logic that would
+      // otherwise run on a later strategy's independent detection. Falls
+      // back to the earlier-resolved `event` if this call fails — a
+      // failure here must never block the trade itself.
+      if (event) {
+        try {
+          event =
+            (await resolveOrCreateEvent(
+              { tokenMint: signal.tokenMint, signalTime: signal.firstBuyAt, wallets: signal.wallets },
+              signal.tokenSymbol,
+              currentPrice
+            )) ?? event;
+        } catch (err) {
+          errors.push(`backfilling price onto convergence event for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       const signalResult = await supabase
@@ -386,19 +435,7 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
       const signalId = (signalResult.data as { id: string }).id;
 
       if (event) {
-        try {
-          await recordEvaluation({
-            strategyId,
-            eventId: event.id,
-            decision: "TRADED",
-            qualifyingWalletCount: signal.walletCount,
-            qualifyingAvgSmartScore: signal.averageSmartScore,
-            evaluatedAt: detectionTime,
-            demoSignalId: signalId,
-          });
-        } catch (err) {
-          errors.push(`recording TRADED evaluation for ${signal.tokenMint}: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        await recordDecisionForEvent(event, signal, "TRADED", signalId);
       }
 
       const positionResult = await supabase

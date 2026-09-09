@@ -60,6 +60,37 @@ export async function recordEvaluation(input: RecordEvaluationInput): Promise<vo
   assertNoError(result, "recording demo signal evaluation");
 }
 
+/**
+ * Whether this strategy has ALREADY made a durable decision about this
+ * event — TRADED or any SKIPPED_* reason, it doesn't matter which. Used to
+ * gate entry into the skip/trade decision gauntlet in run-tick.ts: the
+ * first evaluation for a (strategy, event) pair is final, and must never be
+ * followed by a second trade attempt just because an earlier position on
+ * the same event later closed (the (strategy_id, event_id) unique
+ * constraint alone only stops a duplicate *evaluation row*, not a
+ * duplicate *trade* — see the Automatic Evidence Collection plan's
+ * duplicate-trade fix). Keyed by event.id, never by raw token mint, so a
+ * genuinely new future event on the same token is unaffected. Zero
+ * provider calls — a single indexed read against the same unique-
+ * constraint columns.
+ */
+export async function hasEvaluation(strategyId: string, eventId: string): Promise<boolean> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return false;
+
+  const { data, error } = await supabase
+    .from("demo_signal_evaluations")
+    .select("id")
+    .eq("strategy_id", strategyId)
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`checking existing evaluation: ${error.message}`);
+  }
+  return data !== null;
+}
+
 export interface EvaluationSummary {
   id: string;
   strategyId: string;

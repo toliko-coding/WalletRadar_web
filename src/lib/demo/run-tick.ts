@@ -22,6 +22,7 @@ import { resolveOrCreateEvent, type ResolvedEvent } from "@/lib/validation/event
 import { recordEvaluation, hasEvaluation, type SignalDecision } from "@/lib/validation/evaluations-data";
 import { recordObservation } from "@/lib/validation/observations-data";
 import { findMintsNeedingBackfill } from "@/lib/validation/backfill";
+import { acquireStrategyTickLock, releaseStrategyTickLock } from "./tick-locks-data";
 
 export interface SkippedSignal {
   tokenMint: string;
@@ -41,6 +42,8 @@ export interface DemoTickResult {
   /** Genuine new Birdeye calls attributable specifically to the backfill step — 0 whenever every candidate mint was already covered by a call this tick made for another reason, or by the underlying 30s cache. */
   outcomePriceCallsMade: number;
   errors: string[];
+  /** True only when runDemoTickLocked() couldn't acquire this strategy's tick lease because another caller (a manual click or an automated cycle) is already ticking it — not an error, just a normal "try again shortly" outcome. Absent/false for a real, completed tick. */
+  lockSkipped?: boolean;
 }
 
 // Bounds the one deliberate new source of Birdeye calls this feature
@@ -590,4 +593,61 @@ export async function runDemoTick(strategyId: string): Promise<DemoTickResult> {
     outcomePriceCallsMade,
     errors,
   };
+}
+
+function emptyLockSkippedResult(strategyId: string): DemoTickResult {
+  return {
+    strategyId,
+    signalsConsidered: 0,
+    positionsOpened: 0,
+    positionsClosed: 0,
+    priceCallsMade: 0,
+    skippedSignals: [],
+    outcomeObservationsRecorded: 0,
+    outcomePriceCallsMade: 0,
+    errors: [],
+    lockSkipped: true,
+  };
+}
+
+/**
+ * Concurrency-safe wrapper both the manual tick route and the tick-all
+ * automation orchestrator call, instead of runDemoTick directly — so a
+ * manual click and an automated cycle can never race the same strategy
+ * (Automatic Evidence Collection plan §Concurrency model). Acquires a
+ * DB-backed expiring lease (migration 0006) before running, releases it in
+ * a `finally` regardless of outcome. If another caller already holds the
+ * lease, returns immediately with `lockSkipped: true` — not an error, just
+ * "already ticking, try again shortly."
+ */
+export async function runDemoTickLocked(strategyId: string): Promise<DemoTickResult> {
+  const ownerId = crypto.randomUUID();
+
+  let acquired: boolean;
+  try {
+    acquired = await acquireStrategyTickLock(strategyId, ownerId);
+  } catch (err) {
+    return {
+      ...emptyLockSkippedResult(strategyId),
+      lockSkipped: false,
+      errors: [`acquiring tick lock: ${err instanceof Error ? err.message : String(err)}`],
+    };
+  }
+
+  if (!acquired) {
+    return emptyLockSkippedResult(strategyId);
+  }
+
+  try {
+    return await runDemoTick(strategyId);
+  } finally {
+    try {
+      await releaseStrategyTickLock(strategyId, ownerId);
+    } catch {
+      // Best-effort release: if this fails, the lease simply expires
+      // naturally (see migration 0006's lease-duration reasoning) and the
+      // next acquire recovers it. Never let a release failure mask or
+      // overwrite the tick's own result, already returned above.
+    }
+  }
 }

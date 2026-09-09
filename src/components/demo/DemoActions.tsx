@@ -17,14 +17,18 @@ export function DemoActions({ strategy }: { strategy: DemoStrategy }) {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status})`);
       if (action === "tick") {
-        const skipped: Array<{ tokenMint: string; tokenSymbol: string | null; reason: string }> =
-          json.skippedSignals ?? [];
-        const skippedSummary = skipped.length
-          ? ` — skipped: ${skipped.map((s) => `${s.tokenSymbol ?? s.tokenMint.slice(0, 4)} (${s.reason})`).join(", ")}`
-          : "";
-        setMessage(
-          `Signals considered: ${json.signalsConsidered}, opened: ${json.positionsOpened}, closed: ${json.positionsClosed}, price calls: ${json.priceCallsMade} (${json.outcomePriceCallsMade ?? 0} for outcome backfill), observations recorded: ${json.outcomeObservationsRecorded ?? 0}${skippedSummary}${json.errors?.length ? `, errors: ${json.errors.join("; ")}` : ""}`
-        );
+        if (json.lockSkipped) {
+          setMessage("Already ticking (another call — a manual click or an automated cycle — is in progress for this strategy). Try again shortly.");
+        } else {
+          const skipped: Array<{ tokenMint: string; tokenSymbol: string | null; reason: string }> =
+            json.skippedSignals ?? [];
+          const skippedSummary = skipped.length
+            ? ` — skipped: ${skipped.map((s) => `${s.tokenSymbol ?? s.tokenMint.slice(0, 4)} (${s.reason})`).join(", ")}`
+            : "";
+          setMessage(
+            `Signals considered: ${json.signalsConsidered}, opened: ${json.positionsOpened}, closed: ${json.positionsClosed}, price calls: ${json.priceCallsMade} (${json.outcomePriceCallsMade ?? 0} for outcome backfill), observations recorded: ${json.outcomeObservationsRecorded ?? 0}${skippedSummary}${json.errors?.length ? `, errors: ${json.errors.join("; ")}` : ""}`
+          );
+        }
       }
       if (action === "delete") {
         router.push("/demo");

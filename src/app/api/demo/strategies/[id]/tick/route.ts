@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runDemoTick } from "@/lib/demo/run-tick";
+import { runDemoTickLocked } from "@/lib/demo/run-tick";
 import { isBirdeyeConfigured } from "@/lib/env";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +13,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   try {
-    const result = await runDemoTick(id);
+    // Locked, not the raw runDemoTick — so a manual click here can never
+    // race an automated tick-all cycle ticking the same strategy at the
+    // same time (Automatic Evidence Collection plan §Concurrency model).
+    const result = await runDemoTickLocked(id);
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 502 });

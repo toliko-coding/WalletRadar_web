@@ -1,5 +1,11 @@
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ProviderUsagePanel } from "@/components/settings/ProviderUsagePanel";
 import { isBirdeyeConfigured, isHeliusConfigured, isSupabaseConfigured } from "@/lib/env";
+import { getTodayProviderUsage } from "@/lib/telemetry/provider-usage-data";
+
+// Provider usage counters change on every Birdeye/Helius call — must stay
+// dynamic or a prerendered build would show stale/zero counts forever.
+export const dynamic = "force-dynamic";
 
 function Row({ label, connected, hint }: { label: string; connected: boolean; hint: string }) {
   return (
@@ -20,9 +26,11 @@ function Row({ label, connected, hint }: { label: string; connected: boolean; hi
   );
 }
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const usage = await getTodayProviderUsage();
+
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="Settings"
         description="Provider connectivity and configuration. Filter presets, watchlists, and account settings arrive with auth in Phase 2."
@@ -44,6 +52,8 @@ export default function SettingsPage() {
           hint="Persistence for candidate wallets, metrics, and job history. Create a project, run supabase/migrations, and set the Supabase env vars."
         />
       </div>
+
+      <ProviderUsagePanel usage={usage} />
     </div>
   );
 }

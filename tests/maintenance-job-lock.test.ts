@@ -11,7 +11,7 @@ vi.mock("@/lib/supabase/server", () => ({
   getSupabaseServiceClient: () => ({ rpc: rpcMock, from: fromMock }),
 }));
 
-const { acquireMaintenanceJobLock, releaseMaintenanceJobLock, getMaintenanceLockStatus, DEFAULT_MAINTENANCE_LEASE_SECONDS } =
+const { acquireMaintenanceJobLock, releaseMaintenanceJobLock, getMaintenanceLockStatus, withMaintenanceLock, DEFAULT_MAINTENANCE_LEASE_SECONDS } =
   await import("@/lib/jobs/maintenance-lock");
 
 beforeEach(() => {
@@ -96,5 +96,65 @@ describe("getMaintenanceLockStatus", () => {
     mockSelectChain({ current_job_name: "discover-wallets", locked_at: "x", locked_until: "y" });
     const status = await getMaintenanceLockStatus();
     expect(Object.keys(status).sort()).toEqual(["currentJobName", "held", "lockedAt", "lockedUntil"].sort());
+  });
+});
+
+describe("withMaintenanceLock", () => {
+  it("runs fn and returns its result when the lock is acquired, then releases it", async () => {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "acquire_maintenance_job_lock") return Promise.resolve({ data: true, error: null });
+      if (name === "release_maintenance_job_lock") return Promise.resolve({ error: null });
+      throw new Error(`unexpected rpc ${name}`);
+    });
+    const fn = vi.fn().mockResolvedValue({ processed: 3 });
+
+    const result = await withMaintenanceLock("discover-wallets", fn);
+
+    expect(result).toEqual({ processed: 3 });
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(rpcMock).toHaveBeenCalledWith("release_maintenance_job_lock", expect.any(Object));
+  });
+
+  it("never calls fn when the lock is already held — returns lockSkipped instead", async () => {
+    rpcMock.mockResolvedValue({ data: false, error: null }); // acquire fails
+    const fn = vi.fn();
+
+    const result = await withMaintenanceLock("analyze-candidate-wallets", fn);
+
+    expect(result).toEqual({ lockSkipped: true });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("never calls fn when the acquire check itself throws (fails closed, treated like 'already held')", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "connection refused" } });
+    const fn = vi.fn();
+
+    const result = await withMaintenanceLock("analyze-refresh-wallets", fn);
+
+    expect(result).toEqual({ lockSkipped: true });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("releases the lock even when fn throws, and lets the error propagate", async () => {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "acquire_maintenance_job_lock") return Promise.resolve({ data: true, error: null });
+      if (name === "release_maintenance_job_lock") return Promise.resolve({ error: null });
+      throw new Error(`unexpected rpc ${name}`);
+    });
+    const fn = vi.fn().mockRejectedValue(new Error("job blew up"));
+
+    await expect(withMaintenanceLock("discover-wallets", fn)).rejects.toThrow("job blew up");
+    expect(rpcMock).toHaveBeenCalledWith("release_maintenance_job_lock", expect.any(Object));
+  });
+
+  it("a release failure never masks fn's already-computed result", async () => {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "acquire_maintenance_job_lock") return Promise.resolve({ data: true, error: null });
+      if (name === "release_maintenance_job_lock") return Promise.resolve({ error: { message: "release failed" } });
+      throw new Error(`unexpected rpc ${name}`);
+    });
+    const fn = vi.fn().mockResolvedValue({ processed: 5 });
+
+    await expect(withMaintenanceLock("discover-wallets", fn)).resolves.toEqual({ processed: 5 });
   });
 });

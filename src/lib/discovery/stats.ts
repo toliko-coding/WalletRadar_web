@@ -80,6 +80,27 @@ export async function getLastJobRunAt(jobName: string): Promise<string | null> {
   return (data?.completed_at as string | undefined) ?? null;
 }
 
+/**
+ * The discovery backlog gate's input (Corrective Phase v2, Objective 2/§4)
+ * — exactly the same population `analyze-candidate-wallets`' exploration
+ * lane already selects from (`pending` = never analyzed, `failed` = a prior
+ * attempt errored and still needs retrying; `analyzing` is transient/
+ * in-progress, `analyzed` is resolved, neither counts as backlog). Pure
+ * operational flow control: never deletes wallets, never changes a score or
+ * `analysis_status` itself.
+ */
+export async function getPendingCandidateBacklogCount(): Promise<number> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return 0;
+
+  const { count } = await supabase
+    .from("candidate_wallets")
+    .select("*", { count: "exact", head: true })
+    .in("analysis_status", ["pending", "failed"]);
+
+  return count ?? 0;
+}
+
 export interface JobRunRecord {
   jobName: string;
   startedAt: string;

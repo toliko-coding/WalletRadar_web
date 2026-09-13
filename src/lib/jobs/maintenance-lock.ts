@@ -58,6 +58,50 @@ export async function releaseMaintenanceJobLock(ownerId: string): Promise<void> 
   }
 }
 
+export interface LockSkipped {
+  lockSkipped: true;
+}
+
+/**
+ * Runs `fn` only if the global maintenance lock can be acquired for
+ * `jobName`, releasing it in `finally` regardless of outcome. If the lock
+ * is already held (by another job type, or a stale-but-unexpired crash) —
+ * or the acquire check itself fails (a genuine infra error, treated the
+ * same as "couldn't get it" here, fail-closed) — `fn` is NEVER called, so
+ * whatever `fn` would have written (a job_runs row, in every caller of this
+ * function) simply doesn't happen. This is deliberate: a skipped attempt
+ * must not advance the timestamp `isJobDue()` reads for this job — see the
+ * Corrective Phase v2 guardrail ("last successful/completed execution ≠
+ * last attempted check"). The caller is expected to log/report the skip
+ * itself; this wrapper only decides whether `fn` runs at all.
+ */
+export async function withMaintenanceLock<T>(jobName: string, fn: () => Promise<T>): Promise<T | LockSkipped> {
+  const ownerId = crypto.randomUUID();
+
+  let acquired: boolean;
+  try {
+    acquired = await acquireMaintenanceJobLock(ownerId, jobName);
+  } catch {
+    return { lockSkipped: true };
+  }
+  if (!acquired) {
+    return { lockSkipped: true };
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try {
+      await releaseMaintenanceJobLock(ownerId);
+    } catch {
+      // Best-effort release: if this fails, the lease simply expires
+      // naturally (see migration 0007's 12h lease reasoning) and the next
+      // acquire recovers it. Never let a release failure mask fn()'s
+      // already-computed result, already returned above.
+    }
+  }
+}
+
 export interface MaintenanceLockStatus {
   held: boolean;
   currentJobName: string | null;

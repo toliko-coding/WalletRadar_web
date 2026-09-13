@@ -5,6 +5,7 @@ import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { traderTypeFromTags } from "@/lib/discovery/trader-type";
 import { mergeDiscoveryHit, type CandidateWalletRecord, type DiscoveryHit } from "@/lib/discovery/merge-candidate";
 import { assertNoError } from "@/lib/supabase/assert";
+import { withMaintenanceLock } from "@/lib/jobs/maintenance-lock";
 
 export interface DiscoverWalletsResult {
   tokensScanned: number;
@@ -12,6 +13,12 @@ export interface DiscoverWalletsResult {
   totalHits: number;
   errors: string[];
   persisted: boolean;
+  /** True only when the global maintenance lock (migration 0007) was already held by a different job — not an error, just "try again next cycle." */
+  lockSkipped?: boolean;
+}
+
+function emptyDiscoverResult(): DiscoverWalletsResult {
+  return { tokensScanned: 0, uniqueWalletsDiscovered: 0, totalHits: 0, errors: [], persisted: false };
 }
 
 /**
@@ -19,9 +26,24 @@ export interface DiscoverWalletsResult {
  * dedupe -> candidate pool. Runs against real Birdeye data every time it's
  * called; there's no cron wiring yet (see supabase/CRON.md) so this is
  * invoked manually via POST /api/jobs/discover-wallets for now.
+ *
+ * Wrapped in the global maintenance lock (migration 0007) — shared with the
+ * two analyze-* jobs, "only one maintenance job of any type in flight at a
+ * time." A lock-skip returns immediately without ever reaching the
+ * job_runs write below, so it can never advance this job's due-state
+ * timestamp (see withMaintenanceLock's own doc comment).
  */
 export async function runDiscoverWallets(
   opts: { trendingTokenLimit?: number; topTradersPerToken?: number } = {}
+): Promise<DiscoverWalletsResult> {
+  const result = await withMaintenanceLock("discover-wallets", () => runDiscoverWalletsUnlocked(opts));
+  return typeof result === "object" && result !== null && "lockSkipped" in result
+    ? { ...emptyDiscoverResult(), lockSkipped: true }
+    : result;
+}
+
+async function runDiscoverWalletsUnlocked(
+  opts: { trendingTokenLimit?: number; topTradersPerToken?: number }
 ): Promise<DiscoverWalletsResult> {
   const trendingTokenLimit = opts.trendingTokenLimit ?? 10;
   const topTradersPerToken = opts.topTradersPerToken ?? 10;

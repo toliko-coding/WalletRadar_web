@@ -7,6 +7,7 @@ import {
   type ProviderName,
   type ProviderUsageCounts,
   type StoredProviderUsage,
+  type RetryReasonCounts,
 } from "./provider-usage";
 
 // Per-process fallback when Supabase isn't configured — mirrors
@@ -48,6 +49,7 @@ export async function recordProviderUsage(provider: ProviderName, counts: Provid
       p_retries: counts.retries ?? 0,
       p_cache_hits: counts.cacheHits ?? 0,
       p_cache_misses: counts.cacheMisses ?? 0,
+      p_retry_reasons: counts.retryReasons ?? {},
     });
     if (error) {
       console.error(`recordProviderUsage(${provider}): ${error.message}`);
@@ -78,7 +80,7 @@ export async function getTodayProviderUsage(): Promise<TodayProviderUsage[]> {
 
   const { data } = await supabase
     .from("provider_usage_daily")
-    .select("provider, outbound_attempts, successful_requests, retries, cache_hits, cache_misses")
+    .select("provider, outbound_attempts, successful_requests, retries, cache_hits, cache_misses, retry_reasons")
     .eq("usage_date", date);
 
   const byProvider = new Map((data ?? []).map((r) => [r.provider as string, r]));
@@ -94,6 +96,11 @@ export async function getTodayProviderUsage(): Promise<TodayProviderUsage[]> {
             retries: row.retries as number,
             cacheHits: row.cache_hits as number,
             cacheMisses: row.cache_misses as number,
+            // Diagnostic-only breakdown (Corrective Phase v2, Objective 3) —
+            // not surfaced in AutomationPanel yet, deliberately: intended
+            // for direct inspection after a few days of real data, not a
+            // new dashboard (see error-classification.ts's doc comment).
+            retryReasons: (row.retry_reasons as RetryReasonCounts | null) ?? {},
           }
         : emptyCounts(),
     };

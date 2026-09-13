@@ -28,19 +28,19 @@ describe("getUtcDateString", () => {
 describe("mergeCounts", () => {
   it("starts from an empty bucket when nothing existed before", () => {
     const result = mergeCounts(undefined, { outboundAttempts: 1, successfulRequests: 1 });
-    expect(result).toEqual({ outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 0, cacheMisses: 0 });
+    expect(result).toEqual({ outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 0, cacheMisses: 0, retryReasons: {} });
   });
 
   it("accumulates onto an existing bucket rather than replacing it", () => {
-    const existing = { outboundAttempts: 3, successfulRequests: 2, retries: 1, cacheHits: 5, cacheMisses: 1 };
+    const existing = { outboundAttempts: 3, successfulRequests: 2, retries: 1, cacheHits: 5, cacheMisses: 1, retryReasons: {} };
     const result = mergeCounts(existing, { outboundAttempts: 2, retries: 1 });
-    expect(result).toEqual({ outboundAttempts: 5, successfulRequests: 2, retries: 2, cacheHits: 5, cacheMisses: 1 });
+    expect(result).toEqual({ outboundAttempts: 5, successfulRequests: 2, retries: 2, cacheHits: 5, cacheMisses: 1, retryReasons: {} });
   });
 
   it("treats every field as optional, defaulting an omitted increment field to 0", () => {
-    const existing = { outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 0, cacheMisses: 0 };
+    const existing = { outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 0, cacheMisses: 0, retryReasons: {} };
     const result = mergeCounts(existing, { cacheHits: 1 });
-    expect(result).toEqual({ outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 1, cacheMisses: 0 });
+    expect(result).toEqual({ outboundAttempts: 1, successfulRequests: 1, retries: 0, cacheHits: 1, cacheMisses: 0, retryReasons: {} });
   });
 
   it("accumulates correctly across repeated calls, independent of any particular branch", () => {
@@ -48,6 +48,22 @@ describe("mergeCounts", () => {
     counts = mergeCounts(counts, { outboundAttempts: 3, retries: 2, successfulRequests: 1 });
     counts = mergeCounts(counts, { cacheHits: 1 });
     counts = mergeCounts(counts, { cacheMisses: 1 });
-    expect(counts).toEqual({ outboundAttempts: 4, successfulRequests: 2, retries: 2, cacheHits: 1, cacheMisses: 1 });
+    expect(counts).toEqual({ outboundAttempts: 4, successfulRequests: 2, retries: 2, cacheHits: 1, cacheMisses: 1, retryReasons: {} });
+  });
+
+  it("merges retryReasons at both levels (reason, then path) rather than replacing the whole map", () => {
+    let counts = mergeCounts(undefined, { retryReasons: { rate_limited: { "/defi/price": 2 } } });
+    counts = mergeCounts(counts, { retryReasons: { rate_limited: { "/defi/price": 3, "/wallet/v2/trade-data/single": 1 } } });
+    counts = mergeCounts(counts, { retryReasons: { network_error: { "/defi/price": 1 } } });
+    expect(counts.retryReasons).toEqual({
+      rate_limited: { "/defi/price": 5, "/wallet/v2/trade-data/single": 1 },
+      network_error: { "/defi/price": 1 },
+    });
+  });
+
+  it("leaves retryReasons untouched when the increment omits it", () => {
+    const existing = { ...mergeCounts(undefined, {}), retryReasons: { server_error: { "/defi/price": 1 } } };
+    const result = mergeCounts(existing, { outboundAttempts: 1 });
+    expect(result.retryReasons).toEqual({ server_error: { "/defi/price": 1 } });
   });
 });

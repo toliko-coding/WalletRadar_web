@@ -37,7 +37,19 @@ export class TokenBucket {
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  opts: { retries?: number; baseDelayMs?: number } = {}
+  opts: {
+    retries?: number;
+    baseDelayMs?: number;
+    /**
+     * Pure observer, called for every failed attempt (including the final
+     * one that exhausts retries) — for telemetry/diagnostics only (see
+     * error-classification.ts). Never influences whether/how many times to
+     * retry, the backoff delay, or which errors are considered retryable —
+     * retry behavior itself is deliberately unchanged in this phase (see
+     * the Corrective Phase v2 plan's Objective 3: diagnose first).
+     */
+    onRetry?: (error: unknown, attempt: number) => void;
+  } = {}
 ): Promise<T> {
   const retries = opts.retries ?? 3;
   const baseDelayMs = opts.baseDelayMs ?? 300;
@@ -48,6 +60,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error;
+      opts.onRetry?.(error, attempt);
       if (attempt === retries) break;
       const delay = baseDelayMs * 2 ** attempt + Math.random() * baseDelayMs;
       await new Promise((resolve) => setTimeout(resolve, delay));

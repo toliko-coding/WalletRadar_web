@@ -3,6 +3,8 @@ import { requireHeliusApiKey } from "@/lib/env";
 import { withRetry } from "@/lib/rate-limit/token-bucket";
 import { getGlobalTokenBucket } from "@/lib/rate-limit/global-token-bucket";
 import { recordProviderUsage } from "@/lib/telemetry/provider-usage-data";
+import { classifyProviderError } from "@/lib/providers/error-classification";
+import type { RetryReasonCounts } from "@/lib/telemetry/provider-usage";
 
 const BASE_URL = "https://mainnet.helius-rpc.com";
 
@@ -37,19 +39,31 @@ export async function heliusGet<T>(
 
   // See the matching comment in birdeye/client.ts — same reasoning applies
   // here: one recordProviderUsage call per top-level heliusGet, covering
-  // whatever withRetry actually did internally.
+  // whatever withRetry actually did internally. retryReasons is the same
+  // pure diagnostic classification, never influencing retry behavior.
   let attempts = 0;
   let succeeded = false;
+  const retryReasons: RetryReasonCounts = {};
   try {
-    const result = await withRetry(async () => {
-      attempts += 1;
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new HeliusApiError(`Helius GET ${path} failed: ${res.status} ${text}`, res.status, path);
+    const result = await withRetry(
+      async () => {
+        attempts += 1;
+        const res = await fetch(url.toString(), { cache: "no-store" });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new HeliusApiError(`Helius GET ${path} failed: ${res.status} ${text}`, res.status, path);
+        }
+        return (await res.json()) as T;
+      },
+      {
+        onRetry: (error) => {
+          const { reason, path: classifiedPath } = classifyProviderError(error, path);
+          const pathCounts = retryReasons[reason] ?? {};
+          pathCounts[classifiedPath] = (pathCounts[classifiedPath] ?? 0) + 1;
+          retryReasons[reason] = pathCounts;
+        },
       }
-      return (await res.json()) as T;
-    });
+    );
     succeeded = true;
     return result;
   } finally {
@@ -57,6 +71,7 @@ export async function heliusGet<T>(
       outboundAttempts: attempts,
       retries: Math.max(0, attempts - 1),
       successfulRequests: succeeded ? 1 : 0,
+      retryReasons,
     });
   }
 }

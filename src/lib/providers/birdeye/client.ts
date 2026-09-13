@@ -3,6 +3,8 @@ import { requireBirdeyeApiKey } from "@/lib/env";
 import { withRetry } from "@/lib/rate-limit/token-bucket";
 import { getGlobalTokenBucket } from "@/lib/rate-limit/global-token-bucket";
 import { recordProviderUsage } from "@/lib/telemetry/provider-usage-data";
+import { classifyProviderError } from "@/lib/providers/error-classification";
+import type { RetryReasonCounts } from "@/lib/telemetry/provider-usage";
 
 const BASE_URL = "https://public-api.birdeye.so";
 
@@ -49,37 +51,53 @@ export async function birdeyeRequest<T>(
   // not per attempt, fired from `finally` so it covers both the success and
   // final-failure paths. Does not alter retry/rate-limit behavior at all;
   // see recordProviderUsage's own doc comment for why this can never throw.
+  //
+  // retryReasons (Corrective Phase v2, Objective 3): classifies each failed
+  // attempt via the `onRetry` observer — a pure diagnostic, never consulted
+  // by withRetry itself for retry/backoff decisions (retry behavior is
+  // deliberately unchanged in this phase).
   let attempts = 0;
   let succeeded = false;
+  const retryReasons: RetryReasonCounts = {};
   try {
-    const result = await withRetry(async () => {
-      attempts += 1;
-      const res = await fetch(url.toString(), {
-        method: opts.method ?? "GET",
-        headers: {
-          "X-API-KEY": apiKey,
-          "x-chain": opts.chain ?? "solana",
-          ...(opts.body ? { "Content-Type": "application/json" } : {}),
+    const result = await withRetry(
+      async () => {
+        attempts += 1;
+        const res = await fetch(url.toString(), {
+          method: opts.method ?? "GET",
+          headers: {
+            "X-API-KEY": apiKey,
+            "x-chain": opts.chain ?? "solana",
+            ...(opts.body ? { "Content-Type": "application/json" } : {}),
+          },
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new BirdeyeApiError(
+            `Birdeye ${opts.method ?? "GET"} ${path} failed: ${res.status} ${text}`,
+            res.status,
+            path
+          );
+        }
+
+        const json = (await res.json()) as { success: boolean; data: T };
+        if (!json.success) {
+          throw new BirdeyeApiError(`Birdeye ${path} returned success=false`, res.status, path);
+        }
+        return json.data;
+      },
+      {
+        onRetry: (error) => {
+          const { reason, path: classifiedPath } = classifyProviderError(error, path);
+          const pathCounts = retryReasons[reason] ?? {};
+          pathCounts[classifiedPath] = (pathCounts[classifiedPath] ?? 0) + 1;
+          retryReasons[reason] = pathCounts;
         },
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new BirdeyeApiError(
-          `Birdeye ${opts.method ?? "GET"} ${path} failed: ${res.status} ${text}`,
-          res.status,
-          path
-        );
       }
-
-      const json = (await res.json()) as { success: boolean; data: T };
-      if (!json.success) {
-        throw new BirdeyeApiError(`Birdeye ${path} returned success=false`, res.status, path);
-      }
-      return json.data;
-    });
+    );
     succeeded = true;
     return result;
   } finally {
@@ -87,6 +105,7 @@ export async function birdeyeRequest<T>(
       outboundAttempts: attempts,
       retries: Math.max(0, attempts - 1),
       successfulRequests: succeeded ? 1 : 0,
+      retryReasons,
     });
   }
 }

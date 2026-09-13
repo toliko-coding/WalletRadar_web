@@ -1,12 +1,15 @@
 import "server-only";
 import { requireHeliusApiKey } from "@/lib/env";
-import { TokenBucket, withRetry } from "@/lib/rate-limit/token-bucket";
+import { withRetry } from "@/lib/rate-limit/token-bucket";
+import { getGlobalTokenBucket } from "@/lib/rate-limit/global-token-bucket";
 import { recordProviderUsage } from "@/lib/telemetry/provider-usage-data";
 
 const BASE_URL = "https://mainnet.helius-rpc.com";
 
 // Conservative default; Helius free/developer tiers comfortably allow this.
-const bucket = new TokenBucket(5, 5);
+// Stored on globalThis for the same singleton-identity reasoning as the
+// Birdeye bucket — see global-token-bucket.ts's doc comment.
+const bucket = getGlobalTokenBucket("helius", 5, 5);
 
 export class HeliusApiError extends Error {
   constructor(

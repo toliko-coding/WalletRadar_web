@@ -1,13 +1,16 @@
 import "server-only";
 import { requireBirdeyeApiKey } from "@/lib/env";
-import { TokenBucket, withRetry } from "@/lib/rate-limit/token-bucket";
+import { withRetry } from "@/lib/rate-limit/token-bucket";
+import { getGlobalTokenBucket } from "@/lib/rate-limit/global-token-bucket";
 import { recordProviderUsage } from "@/lib/telemetry/provider-usage-data";
 
 const BASE_URL = "https://public-api.birdeye.so";
 
 // Standard (free) tier is 1 rps — safe default; override via env later if the
-// account is upgraded (§47 rate-limit strategy).
-const bucket = new TokenBucket(1, 1);
+// account is upgraded (§47 rate-limit strategy). Stored on globalThis (not a
+// plain module-level const) so every possible module copy in this process
+// shares the exact same limiter — see global-token-bucket.ts's doc comment.
+const bucket = getGlobalTokenBucket("birdeye", 1, 1);
 
 export class BirdeyeApiError extends Error {
   constructor(

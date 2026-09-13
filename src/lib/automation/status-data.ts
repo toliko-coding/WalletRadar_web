@@ -1,15 +1,16 @@
 import "server-only";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { getTodayProviderUsage, type TodayProviderUsage } from "@/lib/telemetry/provider-usage-data";
-import { getRecentJobRuns, getLastJobRunAt, type JobRunRecord } from "@/lib/discovery/stats";
+import { getRecentJobRuns, getLastJobRunAt, getPendingCandidateBacklogCount, type JobRunRecord } from "@/lib/discovery/stats";
 import { listStrategies } from "@/lib/demo/strategies";
 import type { DemoStrategy } from "@/lib/demo/types";
 
-/** job_name values written by the three jobs the automation runner schedules — the single place these strings are defined, reused by the runner's due-state checks. */
+/** job_name values written by the jobs the automation runner schedules — the single place these strings are defined, reused by the runner's due-state checks. */
 export const AUTOMATION_JOB_NAMES = {
   tick: "demo-tick-active-strategies",
   discovery: "discover-wallets",
   analyze: "analyze-candidate-wallets",
+  analyzeRefresh: "analyze-refresh-wallets",
 } as const;
 
 export interface AutomationHeartbeat {
@@ -35,8 +36,10 @@ export interface AutomationStatus {
   /** Display-only — a recent mixed-job-type history table. Never used for due-state decisions; see lastJobRunAt for that. */
   recentJobRuns: JobRunRecord[];
   /** The runner's due-state source of truth — one targeted last-completed-run timestamp per job type, immune to being pushed out by a high-frequency job's own history (see getLastJobRunAt's doc comment). */
-  lastJobRunAt: { tick: string | null; discovery: string | null; analyze: string | null };
+  lastJobRunAt: { tick: string | null; discovery: string | null; analyze: string | null; analyzeRefresh: string | null };
   activeStrategies: DemoStrategy[];
+  /** The discovery backlog gate's input (Corrective Phase v2 §4) — count of candidate_wallets not yet successfully analyzed. */
+  pendingCandidateBacklog: number;
 }
 
 /**
@@ -50,18 +53,29 @@ export interface AutomationStatus {
 export async function getAutomationStatus(): Promise<AutomationStatus> {
   const supabase = getSupabaseServiceClient();
 
-  const [todayProviderUsage, recentJobRuns, lastTickAt, lastDiscoveryAt, lastAnalyzeAt, strategies, heartbeatResult] =
-    await Promise.all([
-      getTodayProviderUsage(),
-      getRecentJobRuns(20),
-      getLastJobRunAt(AUTOMATION_JOB_NAMES.tick),
-      getLastJobRunAt(AUTOMATION_JOB_NAMES.discovery),
-      getLastJobRunAt(AUTOMATION_JOB_NAMES.analyze),
-      listStrategies(),
-      supabase
-        ? supabase.from("automation_runner_status").select("*").eq("id", "singleton").maybeSingle()
-        : Promise.resolve({ data: null as Record<string, unknown> | null }),
-    ]);
+  const [
+    todayProviderUsage,
+    recentJobRuns,
+    lastTickAt,
+    lastDiscoveryAt,
+    lastAnalyzeAt,
+    lastAnalyzeRefreshAt,
+    strategies,
+    heartbeatResult,
+    pendingCandidateBacklog,
+  ] = await Promise.all([
+    getTodayProviderUsage(),
+    getRecentJobRuns(20),
+    getLastJobRunAt(AUTOMATION_JOB_NAMES.tick),
+    getLastJobRunAt(AUTOMATION_JOB_NAMES.discovery),
+    getLastJobRunAt(AUTOMATION_JOB_NAMES.analyze),
+    getLastJobRunAt(AUTOMATION_JOB_NAMES.analyzeRefresh),
+    listStrategies(),
+    supabase
+      ? supabase.from("automation_runner_status").select("*").eq("id", "singleton").maybeSingle()
+      : Promise.resolve({ data: null as Record<string, unknown> | null }),
+    getPendingCandidateBacklogCount(),
+  ]);
 
   const row = heartbeatResult.data;
 
@@ -84,8 +98,9 @@ export async function getAutomationStatus(): Promise<AutomationStatus> {
       : null,
     todayProviderUsage,
     recentJobRuns,
-    lastJobRunAt: { tick: lastTickAt, discovery: lastDiscoveryAt, analyze: lastAnalyzeAt },
+    lastJobRunAt: { tick: lastTickAt, discovery: lastDiscoveryAt, analyze: lastAnalyzeAt, analyzeRefresh: lastAnalyzeRefreshAt },
     activeStrategies: strategies.filter((s) => s.status === "ACTIVE"),
+    pendingCandidateBacklog,
   };
 }
 

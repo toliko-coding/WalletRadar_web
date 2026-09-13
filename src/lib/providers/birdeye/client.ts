@@ -43,8 +43,6 @@ export async function birdeyeRequest<T>(
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
 
-  await bucket.take();
-
   // Telemetry (Provider Usage Telemetry, migration 0005): `attempts` counts
   // every real fetch below, including retries withRetry performs
   // internally — one recordProviderUsage call per top-level birdeyeRequest,
@@ -62,6 +60,15 @@ export async function birdeyeRequest<T>(
   try {
     const result = await withRetry(
       async () => {
+        // Corrective Phase v2 fix: acquire a token before EVERY physical
+        // attempt, including retries — previously `bucket.take()` ran only
+        // once before `withRetry()`, so a retried attempt fired immediately
+        // after backoff with no rate-limit pacing at all. Moving it here
+        // means every real fetch below (first attempt or retry) waits its
+        // turn on the same process-global bucket. Does not change retry
+        // count, backoff, retryability, or telemetry (attempts/retries are
+        // still counted identically below).
+        await bucket.take();
         attempts += 1;
         const res = await fetch(url.toString(), {
           method: opts.method ?? "GET",

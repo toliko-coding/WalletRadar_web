@@ -23,7 +23,15 @@ export async function fetchStatus(config: AutomationConfig): Promise<AutomationS
   return (await res.json()) as AutomationStatus;
 }
 
-export async function postJob(config: AutomationConfig, path: string, body?: unknown): Promise<void> {
+/**
+ * Returns the parsed response body (previously discarded) — the
+ * maintenanceLoop needs to see `{ lockSkipped: true }` to distinguish a
+ * lock-skip from a genuine completion for its own heartbeat/log reporting
+ * (job_runs itself already correctly has no row for a lock-skip either
+ * way — see withMaintenanceLock's doc comment — this is purely about what
+ * the runner reports, not about due-state correctness).
+ */
+export async function postJob(config: AutomationConfig, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const res = await authorizedFetch(config, path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -33,6 +41,7 @@ export async function postJob(config: AutomationConfig, path: string, body?: unk
     const text = await res.text().catch(() => "");
     throw new Error(`POST ${path} failed: ${res.status} ${text}`);
   }
+  return (await res.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
 export async function postHeartbeat(config: AutomationConfig, payload: RecordHeartbeatInput): Promise<void> {

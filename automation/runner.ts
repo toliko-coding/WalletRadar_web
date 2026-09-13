@@ -7,9 +7,26 @@
  * existing job/automation routes rather than duplicating any trading or
  * validation logic itself).
  *
+ * Corrective Phase v2 architecture: THREE independent loops, not one
+ * blocking cycle —
+ *   - tickLoop: strategy ticks, time-sensitive, never blocked by anything
+ *     else in this process.
+ *   - heartbeatLoop: a bare liveness ping on its own short interval,
+ *     decoupled from whatever the other two loops are doing, so
+ *     last_heartbeat_at stays fresh even during a long maintenance job.
+ *   - maintenanceLoop: discovery/exploration/refresh, serialized — at most
+ *     one of these three runs at a time, chosen by priority
+ *     (REFRESH > EXPLORATION > DISCOVERY) among whichever are both due and
+ *     budget/backlog-eligible this iteration.
+ * The actual due-check-and-maybe-run decision for each loop lives in
+ * automation/loops.ts (runOneTickCheck / runOneHeartbeatPing /
+ * runOneMaintenanceCheck) — kept separate specifically so it's unit-
+ * testable with injected fetchStatus/postJob, including simulating a slow
+ * maintenance job without ever running a real multi-hour one.
+ *
  * Never fabricates progress: every "is X due" decision is re-derived fresh
  * from the server's own persisted state (job_runs, via
- * /api/automation/status) at the start of every cycle — this process keeps
+ * /api/automation/status) at the start of every check — this process keeps
  * no authoritative memory of its own about what it did last, so a crash,
  * a Mac sleep, or the Next.js server being briefly unreachable can never
  * cause a burst of catch-up runs or a false "already done" skip.
@@ -17,9 +34,9 @@
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadAutomationConfig, type AutomationConfig } from "./config";
-import { fetchStatus, postJob, postHeartbeat } from "./api-client";
+import { postHeartbeat } from "./api-client";
 import { removeLockFile } from "./lock-file";
-import { isJobDue, shouldStartExpensiveJob } from "@/lib/automation/scheduling";
+import { runOneTickCheck, runOneHeartbeatPing, runOneMaintenanceCheck, type RunnerIdentity } from "./loops";
 
 // .env.local is outside Next.js's own env-loading pipeline for this
 // standalone process — must be loaded explicitly. Native to Node 20.6+/22
@@ -27,169 +44,110 @@ import { isJobDue, shouldStartExpensiveJob } from "@/lib/automation/scheduling";
 // dependency needed.
 process.loadEnvFile(resolve(process.cwd(), ".env.local"));
 
-const runnerId = process.env.WALLETRADAR_RUNNER_ID ?? randomUUID();
-const startedAt = process.env.WALLETRADAR_RUNNER_STARTED_AT ?? new Date().toISOString();
+const identity: RunnerIdentity = {
+  runnerId: process.env.WALLETRADAR_RUNNER_ID ?? randomUUID(),
+  pid: process.pid,
+  startedAt: process.env.WALLETRADAR_RUNNER_STARTED_AT ?? new Date().toISOString(),
+};
 
 let shutdownRequested = false;
-let currentSleepResolve: (() => void) | null = null;
 
 function log(message: string): void {
   console.log(`[automation ${new Date().toISOString()}] ${message}`);
 }
 
-function interruptibleSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    currentSleepResolve = resolve;
-    setTimeout(() => {
-      currentSleepResolve = null;
-      resolve();
-    }, ms);
-  });
+/**
+ * Each loop gets its OWN interruptible-sleep resolver slot — with three
+ * independent loops now instead of one, a single shared resolver (the
+ * original design) would only ever wake whichever loop happened to set it
+ * last. `requestShutdown` wakes all three explicitly.
+ */
+function makeInterruptibleSleep(): { sleep: (ms: number) => Promise<void>; wake: () => void } {
+  let currentResolve: (() => void) | null = null;
+  return {
+    sleep(ms: number): Promise<void> {
+      return new Promise((res) => {
+        currentResolve = res;
+        setTimeout(() => {
+          currentResolve = null;
+          res();
+        }, ms);
+      });
+    },
+    wake(): void {
+      currentResolve?.();
+      currentResolve = null;
+    },
+  };
 }
 
+const tickSleeper = makeInterruptibleSleep();
+const heartbeatSleeper = makeInterruptibleSleep();
+const maintenanceSleeper = makeInterruptibleSleep();
+
 function requestShutdown(signal: string): void {
-  log(`received ${signal}, finishing the current cycle (if any) and shutting down gracefully — never force-killing in-flight work`);
+  log(`received ${signal}, finishing any in-flight work on each loop and shutting down gracefully — never force-killing`);
   shutdownRequested = true;
-  if (currentSleepResolve) {
-    const wake = currentSleepResolve;
-    currentSleepResolve = null;
-    wake();
-  }
+  tickSleeper.wake();
+  heartbeatSleeper.wake();
+  maintenanceSleeper.wake();
 }
 
 process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 process.on("SIGINT", () => requestShutdown("SIGINT"));
 
-function heartbeatConfig(config: AutomationConfig) {
-  return {
-    tickIntervalMinutes: config.tickIntervalMinutes,
-    discoveryIntervalHours: config.discoveryIntervalHours,
-    analyzeIntervalHours: config.analyzeIntervalHours,
-    analyzeBatchSize: config.analyzeBatchSize,
-    expensiveJobDailyBudget: config.expensiveJobDailyBudget,
-  };
-}
-
 /**
- * One poll iteration: fetch fresh status, decide what's due, run whatever
- * is due sequentially (never concurrently), report one heartbeat at the
- * end. Every "due" decision and the expensive-job budget check both use
- * the SAME status snapshot fetched at the top of this cycle — re-fetching
- * mid-cycle would add complexity for a coarse, explicitly-approximate gate
- * that doesn't need per-job precision (see shouldStartExpensiveJob's own
- * doc comment on the accepted v1 semantics).
+ * Generic "check once, sleep, repeat until shutdown" wrapper shared by all
+ * three loops — a failure inside `check` (e.g. Next.js unreachable) is
+ * caught here so it can never crash this loop or any other; the loop
+ * simply retries on its next poll, matching the original single-cycle
+ * design's "attempted call, not a successful run" semantics.
  */
-async function runOneCycle(config: AutomationConfig): Promise<void> {
-  const status = await fetchStatus(config);
-  const now = new Date();
-
-  const tickDue = isJobDue(status.lastJobRunAt.tick, config.tickIntervalMinutes, now);
-  const discoveryDue = isJobDue(status.lastJobRunAt.discovery, config.discoveryIntervalHours * 60, now);
-  const analyzeDue = isJobDue(status.lastJobRunAt.analyze, config.analyzeIntervalHours * 60, now);
-
-  const todayBirdeyeAttempts = status.todayProviderUsage.find((u) => u.provider === "birdeye")?.usage.outboundAttempts ?? 0;
-  const expensiveJobsAllowed = shouldStartExpensiveJob(todayBirdeyeAttempts, config.expensiveJobDailyBudget);
-
-  let ranSomething = false;
-  const cycleErrors: string[] = [];
-
-  // Ticks are never gated by the expensive-job budget — cheap, and the
-  // entire reason this phase exists (Automatic Evidence Collection plan
-  // §Provider-budget rework).
-  if (tickDue) {
-    ranSomething = true;
+async function runLoop(
+  loopName: string,
+  config: AutomationConfig,
+  sleeper: { sleep: (ms: number) => Promise<void>; wake: () => void },
+  check: () => Promise<void>
+): Promise<void> {
+  while (!shutdownRequested) {
     try {
-      await postJob(config, "/api/jobs/tick-active-strategies");
-      log("tick-active-strategies completed");
+      await check();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      cycleErrors.push(`tick: ${message}`);
-      log(`tick-active-strategies FAILED: ${message}`);
+      log(`${loopName} check failed before completing (e.g. Next.js unreachable): ${message} — will retry next poll, nothing marked as done`);
     }
+    if (shutdownRequested) break;
+    await sleeper.sleep(config.pollIntervalSeconds * 1000);
   }
-
-  if (discoveryDue) {
-    if (expensiveJobsAllowed) {
-      ranSomething = true;
-      try {
-        await postJob(config, "/api/jobs/discover-wallets");
-        log("discover-wallets completed");
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        cycleErrors.push(`discovery: ${message}`);
-        log(`discover-wallets FAILED: ${message}`);
-      }
-    } else {
-      log(
-        `discovery is due but skipped — today's Birdeye usage (${todayBirdeyeAttempts}) is at/above the expensive-job budget (${config.expensiveJobDailyBudget}); will retry once discovery is due again`
-      );
-    }
-  }
-
-  if (analyzeDue) {
-    if (expensiveJobsAllowed) {
-      ranSomething = true;
-      try {
-        await postJob(config, "/api/jobs/analyze-candidates", { limit: config.analyzeBatchSize });
-        log("analyze-candidates completed");
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        cycleErrors.push(`analyze: ${message}`);
-        log(`analyze-candidates FAILED: ${message}`);
-      }
-    } else {
-      log(
-        `candidate analysis is due but skipped — today's Birdeye usage (${todayBirdeyeAttempts}) is at/above the expensive-job budget (${config.expensiveJobDailyBudget}); will retry once analysis is due again`
-      );
-    }
-  }
-
-  await postHeartbeat(config, {
-    runnerId,
-    pid: process.pid,
-    startedAt,
-    cycleCompleted: ranSomething ? { status: cycleErrors.length === 0 ? "success" : "partial", error: cycleErrors.join("; ") || null } : undefined,
-    config: heartbeatConfig(config),
-  });
+  log(`${loopName} loop stopped`);
 }
 
 async function main(): Promise<void> {
   const config = loadAutomationConfig();
-  log(`runner ${runnerId} started, pid ${process.pid}, target ${config.apiBaseUrl}`);
+  log(`runner ${identity.runnerId} started, pid ${identity.pid}, target ${config.apiBaseUrl}`);
   log(
-    `config: tick every ${config.tickIntervalMinutes}min, discovery every ${config.discoveryIntervalHours}h, analyze every ${config.analyzeIntervalHours}h (batch ${config.analyzeBatchSize}), expensive-job daily budget ${config.expensiveJobDailyBudget}`
+    `config: tick every ${config.tickIntervalMinutes}min; maintenance priority refresh(${config.analyzeRefreshIntervalHours}h)>exploration(${config.analyzeIntervalHours}h)>discovery(${config.discoveryIntervalHours}h); ` +
+      `discovery backlog high-water mark ${config.discoveryBacklogHighWaterMark}; budget: refresh-only above ${config.budgetRefreshReserveThreshold}, nothing above ${config.expensiveJobDailyBudget}`
   );
 
-  while (!shutdownRequested) {
-    try {
-      await runOneCycle(config);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log(`cycle failed before completing (e.g. Next.js unreachable): ${message} — will retry next poll, nothing marked as done`);
-      await postHeartbeat(config, {
-        runnerId,
-        pid: process.pid,
-        startedAt,
-        cycleCompleted: { status: "failed", error: message },
-        config: heartbeatConfig(config),
-      }).catch(() => {
-        // Best-effort — if even the heartbeat call fails (e.g. the app is
-        // fully down), there's nothing more to do this iteration.
-      });
-    }
+  await Promise.all([
+    runLoop("tick", config, tickSleeper, () => runOneTickCheck(config, identity)),
+    runLoop("heartbeat", config, heartbeatSleeper, () => runOneHeartbeatPing(config, identity)),
+    runLoop("maintenance", config, maintenanceSleeper, () => runOneMaintenanceCheck(config, identity)),
+  ]);
 
-    if (shutdownRequested) break;
-    await interruptibleSleep(config.pollIntervalSeconds * 1000);
-  }
-
-  log("shutting down: no new job will start, cleaning up");
+  log("all loops stopped: no new job will start, cleaning up");
   try {
     await postHeartbeat(config, {
-      runnerId,
-      pid: process.pid,
-      startedAt,
+      ...identity,
       cycleCompleted: { status: "stopped" },
-      config: heartbeatConfig(config),
+      config: {
+        tickIntervalMinutes: config.tickIntervalMinutes,
+        discoveryIntervalHours: config.discoveryIntervalHours,
+        analyzeIntervalHours: config.analyzeIntervalHours,
+        analyzeBatchSize: config.analyzeBatchSize,
+        expensiveJobDailyBudget: config.expensiveJobDailyBudget,
+      },
     });
   } catch {
     // Best-effort final heartbeat — the local lock-file removal below is

@@ -9,6 +9,14 @@ export interface AutomationConfig {
   analyzeBatchSize: number;
   expensiveJobDailyBudget: number;
   pollIntervalSeconds: number;
+  /** Corrective Phase v2: the refresh lane's own cadence/batch/staleness — independent of the exploration lane's. */
+  analyzeRefreshIntervalHours: number;
+  analyzeRefreshBatchSize: number;
+  analyzeRefreshStalenessHours: number;
+  /** Corrective Phase v2 §4: discovery is skipped for a cycle once pendingCandidateBacklog reaches this — exploration/refresh are unaffected. */
+  discoveryBacklogHighWaterMark: number;
+  /** Corrective Phase v2 §6: below this, all three maintenance job types are budget-eligible; at/above it (and below expensiveJobDailyBudget), only refresh is. Still a self-imposed operational value, not Birdeye's real quota. */
+  budgetRefreshReserveThreshold: number;
 }
 
 function envInt(name: string, fallback: number): number {
@@ -63,5 +71,10 @@ export function loadAutomationConfig(): AutomationConfig {
     analyzeBatchSize: envInt("AUTOMATION_ANALYZE_BATCH_SIZE", 10),
     expensiveJobDailyBudget: envInt("AUTOMATION_EXPENSIVE_JOB_DAILY_BUDGET", 500),
     pollIntervalSeconds: envInt("AUTOMATION_POLL_INTERVAL_SECONDS", 60),
+    analyzeRefreshIntervalHours: envInt("AUTOMATION_ANALYZE_REFRESH_INTERVAL_HOURS", 24),
+    analyzeRefreshBatchSize: envInt("AUTOMATION_ANALYZE_REFRESH_BATCH_SIZE", 10),
+    analyzeRefreshStalenessHours: envInt("AUTOMATION_ANALYZE_REFRESH_STALENESS_HOURS", 24),
+    discoveryBacklogHighWaterMark: envInt("AUTOMATION_DISCOVERY_BACKLOG_HIGH_WATER_MARK", 500),
+    budgetRefreshReserveThreshold: envInt("AUTOMATION_BUDGET_REFRESH_RESERVE_THRESHOLD", 400),
   };
 }

@@ -35,8 +35,6 @@ export async function heliusGet<T>(
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
 
-  await bucket.take();
-
   // See the matching comment in birdeye/client.ts — same reasoning applies
   // here: one recordProviderUsage call per top-level heliusGet, covering
   // whatever withRetry actually did internally. retryReasons is the same
@@ -47,6 +45,11 @@ export async function heliusGet<T>(
   try {
     const result = await withRetry(
       async () => {
+        // Corrective Phase v2 fix: acquire a token before EVERY physical
+        // attempt, including retries — see the matching comment in
+        // birdeye/client.ts. No change to retry count/backoff/retryability
+        // or telemetry.
+        await bucket.take();
         attempts += 1;
         const res = await fetch(url.toString(), { cache: "no-store" });
         if (!res.ok) {

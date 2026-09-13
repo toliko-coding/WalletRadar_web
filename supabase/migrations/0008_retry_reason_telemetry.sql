@@ -13,13 +13,35 @@
 alter table provider_usage_daily
   add column retry_reasons jsonb not null default '{}'::jsonb;
 
--- Same signature as migration 0005's function plus one new, backward-
--- compatible, default-valued parameter — existing callers that omit it
--- behave exactly as before (a no-op merge of '{}'::jsonb changes nothing).
--- Rewritten as plpgsql (was plain sql) because merging a nested map needs a
--- loop; still one row-locked read + one write per call, matching the same
--- concurrency-safety reasoning as every prior migration's atomic upsert.
-create or replace function increment_provider_usage(
+-- IMPORTANT: `create or replace function` does NOT replace an existing
+-- function whose argument list differs — in Postgres, a function's
+-- identity includes its parameter type list, not just its name, so adding
+-- an 8th parameter here would leave migration 0005's original 7-argument
+-- increment_provider_usage(date, text, integer, integer, integer, integer,
+-- integer) in place as a SEPARATE overload, alongside this new 8-argument
+-- one. Two overloads of the same RPC name is exactly the kind of ambiguity
+-- PostgREST cannot always resolve. The old 7-argument signature is
+-- therefore dropped explicitly first, so there is only ever ONE
+-- increment_provider_usage function after this migration runs — the new
+-- 8-argument one, whose `p_retry_reasons` parameter has a default, so a
+-- caller that only ever passed the original 7 named arguments (there are
+-- none left in this codebase, but this keeps the RPC name itself
+-- backward-compatible in shape) still works unchanged.
+drop function if exists increment_provider_usage(
+  date,
+  text,
+  integer,
+  integer,
+  integer,
+  integer,
+  integer
+);
+
+-- Rewritten as plpgsql (was plain sql in migration 0005) because merging a
+-- nested map needs a loop; still one row-locked read + one write per call,
+-- matching the same concurrency-safety reasoning as every prior migration's
+-- atomic upsert.
+create function increment_provider_usage(
   p_date date,
   p_provider text,
   p_outbound_attempts integer default 0,
@@ -86,4 +108,17 @@ begin
 end;
 $$;
 
-grant execute on function increment_provider_usage to service_role;
+-- Qualified with the exact new signature rather than the bare function
+-- name — after the drop above there is only one candidate, but being
+-- explicit here avoids ever depending on "there happens to be only one
+-- overload" being true.
+grant execute on function increment_provider_usage(
+  date,
+  text,
+  integer,
+  integer,
+  integer,
+  integer,
+  integer,
+  jsonb
+) to service_role;

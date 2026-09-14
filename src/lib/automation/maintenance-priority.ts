@@ -62,3 +62,20 @@ export function classifyBudgetTier(
 export function isDiscoveryBacklogBlocked(pendingCandidateBacklog: number, highWaterMark: number): boolean {
   return pendingCandidateBacklog >= highWaterMark;
 }
+
+/** Display-only label for the backlog gate's current state — /settings, checkpoint 5. */
+export function describeBacklogState(pendingCandidateBacklog: number, highWaterMark: number): "Normal" | "Discovery paused by backlog gate" {
+  return isDiscoveryBacklogBlocked(pendingCandidateBacklog, highWaterMark) ? "Discovery paused by backlog gate" : "Normal";
+}
+
+/**
+ * Display-only label for the current provider-budget tier — /settings,
+ * checkpoint 5. Mirrors classifyBudgetTier's own three bands exactly; kept
+ * as a separate function rather than inlined in a component so the mapping
+ * itself is unit-testable independent of any JSX.
+ */
+export function describeBudgetTier(tier: ReadonlySet<MaintenanceJobType>): string {
+  if (tier.size === 0) return "Maintenance paused for provider budget";
+  if (tier.has("discovery")) return "Refresh + Exploration + Discovery allowed";
+  return "Refresh only";
+}

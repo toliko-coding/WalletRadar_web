@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { pickMaintenanceJob, classifyBudgetTier, isDiscoveryBacklogBlocked } from "@/lib/automation/maintenance-priority";
+import {
+  pickMaintenanceJob,
+  classifyBudgetTier,
+  isDiscoveryBacklogBlocked,
+  describeBudgetTier,
+  describeBacklogState,
+} from "@/lib/automation/maintenance-priority";
 
 describe("pickMaintenanceJob", () => {
   it("returns null when nothing is eligible", () => {
@@ -46,5 +52,30 @@ describe("isDiscoveryBacklogBlocked", () => {
 
   it("is blocked well above the high-water mark", () => {
     expect(isDiscoveryBacklogBlocked(609, 500)).toBe(true);
+  });
+});
+
+describe("describeBacklogState", () => {
+  it("is 'Normal' below the high-water mark", () => {
+    expect(describeBacklogState(100, 500)).toBe("Normal");
+  });
+
+  it("is 'Discovery paused by backlog gate' at/above the high-water mark", () => {
+    expect(describeBacklogState(500, 500)).toBe("Discovery paused by backlog gate");
+    expect(describeBacklogState(609, 500)).toBe("Discovery paused by backlog gate");
+  });
+});
+
+describe("describeBudgetTier", () => {
+  it("describes the all-eligible tier", () => {
+    expect(describeBudgetTier(new Set(["refresh", "exploration", "discovery"]))).toBe("Refresh + Exploration + Discovery allowed");
+  });
+
+  it("describes the refresh-only tier", () => {
+    expect(describeBudgetTier(new Set(["refresh"]))).toBe("Refresh only");
+  });
+
+  it("describes the nothing-eligible tier", () => {
+    expect(describeBudgetTier(new Set())).toBe("Maintenance paused for provider budget");
   });
 });

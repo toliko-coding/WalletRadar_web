@@ -1,7 +1,7 @@
 import "server-only";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { getTodayProviderUsage, type TodayProviderUsage } from "@/lib/telemetry/provider-usage-data";
-import { getRecentJobRuns, getLastJobRunAt, getPendingCandidateBacklogCount, type JobRunRecord } from "@/lib/discovery/stats";
+import { getRecentJobRuns, getLastJobRunAt, getPendingCandidateBacklogCount, getJobRunOverview, type JobRunRecord, type JobRunOverview } from "@/lib/discovery/stats";
 import { listStrategies } from "@/lib/demo/strategies";
 import type { DemoStrategy } from "@/lib/demo/types";
 
@@ -40,6 +40,8 @@ export interface AutomationStatus {
   activeStrategies: DemoStrategy[];
   /** The discovery backlog gate's input (Corrective Phase v2 §4) — count of candidate_wallets not yet successfully analyzed. */
   pendingCandidateBacklog: number;
+  /** Display-only richer per-job data (last status, last SUCCESSFUL run specifically) — checkpoint 5. Never used for due-state; see lastJobRunAt for that. */
+  jobRunOverview: { tick: JobRunOverview; discovery: JobRunOverview; analyze: JobRunOverview; analyzeRefresh: JobRunOverview };
 }
 
 /**
@@ -63,6 +65,10 @@ export async function getAutomationStatus(): Promise<AutomationStatus> {
     strategies,
     heartbeatResult,
     pendingCandidateBacklog,
+    tickOverview,
+    discoveryOverview,
+    analyzeOverview,
+    analyzeRefreshOverview,
   ] = await Promise.all([
     getTodayProviderUsage(),
     getRecentJobRuns(20),
@@ -75,6 +81,10 @@ export async function getAutomationStatus(): Promise<AutomationStatus> {
       ? supabase.from("automation_runner_status").select("*").eq("id", "singleton").maybeSingle()
       : Promise.resolve({ data: null as Record<string, unknown> | null }),
     getPendingCandidateBacklogCount(),
+    getJobRunOverview(AUTOMATION_JOB_NAMES.tick),
+    getJobRunOverview(AUTOMATION_JOB_NAMES.discovery),
+    getJobRunOverview(AUTOMATION_JOB_NAMES.analyze),
+    getJobRunOverview(AUTOMATION_JOB_NAMES.analyzeRefresh),
   ]);
 
   const row = heartbeatResult.data;
@@ -101,6 +111,7 @@ export async function getAutomationStatus(): Promise<AutomationStatus> {
     lastJobRunAt: { tick: lastTickAt, discovery: lastDiscoveryAt, analyze: lastAnalyzeAt, analyzeRefresh: lastAnalyzeRefreshAt },
     activeStrategies: strategies.filter((s) => s.status === "ACTIVE"),
     pendingCandidateBacklog,
+    jobRunOverview: { tick: tickOverview, discovery: discoveryOverview, analyze: analyzeOverview, analyzeRefresh: analyzeRefreshOverview },
   };
 }
 

@@ -32,6 +32,12 @@ function status(overrides: Partial<AutomationStatus> = {}): AutomationStatus {
     lastJobRunAt: { tick: null, discovery: null, analyze: null, analyzeRefresh: null },
     activeStrategies: [],
     pendingCandidateBacklog: 0,
+    jobRunOverview: {
+      tick: { lastCompletedAt: null, lastStatus: null, lastSuccessfulAt: null },
+      discovery: { lastCompletedAt: null, lastStatus: null, lastSuccessfulAt: null },
+      analyze: { lastCompletedAt: null, lastStatus: null, lastSuccessfulAt: null },
+      analyzeRefresh: { lastCompletedAt: null, lastStatus: null, lastSuccessfulAt: null },
+    },
     ...overrides,
   };
 }

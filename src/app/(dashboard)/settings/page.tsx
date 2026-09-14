@@ -4,6 +4,8 @@ import { AutomationPanel } from "@/components/settings/AutomationPanel";
 import { isBirdeyeConfigured, isHeliusConfigured, isSupabaseConfigured } from "@/lib/env";
 import { getTodayProviderUsage } from "@/lib/telemetry/provider-usage-data";
 import { getAutomationStatus } from "@/lib/automation/status-data";
+import { getMaintenanceLockStatus } from "@/lib/jobs/maintenance-lock";
+import { getOperationalConfig } from "@/lib/automation/operational-config";
 
 // Provider usage counters change on every Birdeye/Helius call — must stay
 // dynamic or a prerendered build would show stale/zero counts forever.
@@ -29,7 +31,13 @@ function Row({ label, connected, hint }: { label: string; connected: boolean; hi
 }
 
 export default async function SettingsPage() {
-  const [usage, automationStatus] = await Promise.all([getTodayProviderUsage(), getAutomationStatus()]);
+  const [usage, automationStatus, maintenanceLock] = await Promise.all([
+    getTodayProviderUsage(),
+    getAutomationStatus(),
+    getMaintenanceLockStatus(),
+  ]);
+  // Synchronous env read — not worth Promise.all'ing alongside genuine I/O.
+  const operationalConfig = getOperationalConfig();
 
   return (
     <div className="space-y-6">
@@ -57,7 +65,7 @@ export default async function SettingsPage() {
 
       <ProviderUsagePanel usage={usage} />
 
-      <AutomationPanel status={automationStatus} />
+      <AutomationPanel status={automationStatus} maintenanceLock={maintenanceLock} operationalConfig={operationalConfig} />
     </div>
   );
 }

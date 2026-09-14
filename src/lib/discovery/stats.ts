@@ -101,6 +101,54 @@ export async function getPendingCandidateBacklogCount(): Promise<number> {
   return count ?? 0;
 }
 
+export interface JobRunOverview {
+  /** Most recent completed run of ANY outcome — same value getLastJobRunAt returns, plus its status, for display. */
+  lastCompletedAt: string | null;
+  lastStatus: string | null;
+  /** Most recent run whose status was specifically 'success' — may be older than lastCompletedAt if the latest attempt was 'partial'/'failed'. Null if no successful run is on record. */
+  lastSuccessfulAt: string | null;
+}
+
+const EMPTY_JOB_RUN_OVERVIEW: JobRunOverview = { lastCompletedAt: null, lastStatus: null, lastSuccessfulAt: null };
+
+/**
+ * Richer per-job-type display data for /settings' Automation panel
+ * (Corrective Phase v2 checkpoint 5) — separate from getLastJobRunAt
+ * (unchanged, still the runner's own due-state source of truth) so this
+ * purely additive read can never affect scheduling. Two targeted queries
+ * (not the generic top-N getRecentJobRuns list, for the same flooding
+ * reason getLastJobRunAt's own doc comment explains) — cheap Supabase
+ * reads, zero provider calls.
+ */
+export async function getJobRunOverview(jobName: string): Promise<JobRunOverview> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return EMPTY_JOB_RUN_OVERVIEW;
+
+  const [latest, latestSuccess] = await Promise.all([
+    supabase
+      .from("job_runs")
+      .select("completed_at, status")
+      .eq("job_name", jobName)
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("job_runs")
+      .select("completed_at")
+      .eq("job_name", jobName)
+      .eq("status", "success")
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  return {
+    lastCompletedAt: (latest.data?.completed_at as string | undefined) ?? null,
+    lastStatus: (latest.data?.status as string | undefined) ?? null,
+    lastSuccessfulAt: (latestSuccess.data?.completed_at as string | undefined) ?? null,
+  };
+}
+
 export interface JobRunRecord {
   jobName: string;
   startedAt: string;

@@ -128,7 +128,11 @@ export function AutomationPanel({
 }) {
   const { heartbeat, lastJobRunAt, jobRunOverview, recentJobRuns, activeStrategies, pendingCandidateBacklog } = status;
 
-  const runnerState = deriveRunnerState(heartbeat ? { lastHeartbeatAt: heartbeat.lastHeartbeatAt, lastCycleStatus: heartbeat.lastCycleStatus } : null);
+  const runnerState = deriveRunnerState(
+    heartbeat
+      ? { lastHeartbeatAt: heartbeat.lastHeartbeatAt, lastCycleStatus: heartbeat.lastCycleStatus, lastCycleCompletedAt: heartbeat.lastCycleCompletedAt }
+      : null
+  );
   const runnerDisplay = RUNNER_STATE_DISPLAY[runnerState];
 
   const todayBirdeyeAttempts = status.todayProviderUsage.find((u) => u.provider === "birdeye")?.usage.outboundAttempts ?? 0;
